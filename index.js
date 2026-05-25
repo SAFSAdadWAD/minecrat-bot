@@ -1,4 +1,4 @@
-const { createClient, ping } = require('bedrock-protocol')
+const { createClient } = require('bedrock-protocol')
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
@@ -51,60 +51,43 @@ let client = null
 let reconnecting = false
 let antiBotInterval = null
 let position = { x: 0, y: 64, z: 0 }
+let retryDelay = 60000
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function waitForServer() {
-  let consecutiveOk = 0
-  while (true) {
-    try {
-      await ping({ host: CONFIG.host, port: CONFIG.port })
-      consecutiveOk++
-      console.log(`Server risponde (${consecutiveOk}/3)...`)
-      if (consecutiveOk >= 3) {
-        console.log("Server stabile, attendo 5s prima di connettermi...")
-        await sleep(5000)
-        return
-      }
-      await sleep(5000)
-    } catch (e) {
-      if (consecutiveOk > 0) console.log("Server non stabile, riprovo...")
-      consecutiveOk = 0
-      await sleep(10000)
-    }
+function destroyClient() {
+  if (antiBotInterval) { clearInterval(antiBotInterval); antiBotInterval = null }
+  if (client) {
+    try { client.removeAllListeners() } catch (_) {}
+    try { client.disconnect() } catch (_) {}
+    client = null
   }
 }
 
 async function startBot() {
-  if (client) {
-    try { client.disconnect() } catch (_) {}
-    client = null
-  }
-  if (antiBotInterval) {
-    clearInterval(antiBotInterval)
-    antiBotInterval = null
-  }
-
+  destroyClient()
   reconnecting = false
-  console.log("Attendo che il server Aternos sia pronto...")
+  console.log(`Tentativo di connessione a ${CONFIG.host}:${CONFIG.port}...`)
 
-  await waitForServer()
-
-  console.log("Avvio connessione bot Bedrock...")
-
-  client = createClient({
-    host: CONFIG.host,
-    port: CONFIG.port,
-    username: CONFIG.username,
-    clientGuid: BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
-    profilesFolder: CACHE_DIR,
-    useNativeRaknet: false
-  })
+  try {
+    client = createClient({
+      host: CONFIG.host,
+      port: CONFIG.port,
+      username: CONFIG.username,
+      clientGuid: BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
+      profilesFolder: CACHE_DIR
+    })
+  } catch (e) {
+    console.log("Errore creazione client:", e.message)
+    scheduleReconnect()
+    return
+  }
 
   client.on('join', () => {
     console.log("Bot entrato nel server ✔")
+    retryDelay = 60000
 
     try {
       const files = fs.readdirSync(CACHE_DIR)
@@ -134,42 +117,43 @@ async function startBot() {
   })
 
   client.on('spawn', (packet) => {
-    if (packet?.position) position = packet.position
+    if (packet && packet.position) position = packet.position
   })
 
   client.on('disconnect', (packet) => {
-    const reason = packet?.reason || String(packet)
+    const reason = (packet && packet.reason) ? packet.reason : String(packet)
     console.log("Disconnesso:", reason)
-    scheduleReconnect(15000)
+    scheduleReconnect()
   })
 
   client.on('error', (err) => {
-    console.log("Errore:", err.message)
-    scheduleReconnect(15000)
+    if (err && err.message) console.log("Errore:", err.message)
+    scheduleReconnect()
   })
 
   client.on('close', () => {
     console.log("Connessione chiusa")
-    scheduleReconnect(15000)
+    scheduleReconnect()
   })
 }
 
-function scheduleReconnect(delay = 15000) {
+function scheduleReconnect() {
   if (reconnecting) return
   reconnecting = true
-  if (antiBotInterval) { clearInterval(antiBotInterval); antiBotInterval = null }
-  console.log(`Reconnect tra ${delay / 1000} secondi...`)
-  setTimeout(startBot, delay)
+  destroyClient()
+  console.log(`Reconnect tra ${retryDelay / 1000}s...`)
+  setTimeout(startBot, retryDelay)
+  retryDelay = Math.min(retryDelay + 30000, 120000)
 }
 
 process.on('uncaughtException', (err) => {
-  console.log("Crash evitato:", err.message)
-  scheduleReconnect(15000)
+  if (err && err.message) console.log("Crash evitato:", err.message)
+  if (!reconnecting) scheduleReconnect()
 })
 
 process.on('unhandledRejection', (err) => {
-  console.log("Promise rifiutata:", err?.message || err)
-  scheduleReconnect(15000)
+  if (err && err.message) console.log("Promise rifiutata:", err.message)
+  if (!reconnecting) scheduleReconnect()
 })
 
 startBot()
