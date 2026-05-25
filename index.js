@@ -6,7 +6,6 @@ const path = require('path')
 const CACHE_DIR = '.auth-cache'
 const AUTH_ENV = 'AUTH_DATA'
 
-// Ripristina i token dalla variabile d'ambiente se presenti
 if (process.env[AUTH_ENV]) {
   try {
     const data = JSON.parse(process.env[AUTH_ENV])
@@ -20,7 +19,6 @@ if (process.env[AUTH_ENV]) {
   }
 }
 
-// Keep-alive web server per UptimeRobot
 http.createServer((req, res) => {
   if (req.url === '/token-backup') {
     try {
@@ -54,6 +52,10 @@ let reconnecting = false
 let antiBotInterval = null
 let position = { x: 0, y: 64, z: 0 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 async function waitForServer() {
   let consecutiveOk = 0
   while (true) {
@@ -62,7 +64,8 @@ async function waitForServer() {
       consecutiveOk++
       console.log(`Server risponde (${consecutiveOk}/3)...`)
       if (consecutiveOk >= 3) {
-        console.log("Server stabile, connessione in corso...")
+        console.log("Server stabile, attendo 5s prima di connettermi...")
+        await sleep(5000)
         return
       }
       await sleep(5000)
@@ -72,10 +75,6 @@ async function waitForServer() {
       await sleep(10000)
     }
   }
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function startBot() {
@@ -91,13 +90,7 @@ async function startBot() {
   reconnecting = false
   console.log("Attendo che il server Aternos sia pronto...")
 
-  try {
-    await waitForServer()
-  } catch (e) {
-    console.log("Errore nel ping:", e.message)
-    scheduleReconnect(15000)
-    return
-  }
+  await waitForServer()
 
   console.log("Avvio connessione bot Bedrock...")
 
@@ -106,7 +99,8 @@ async function startBot() {
     port: CONFIG.port,
     username: CONFIG.username,
     clientGuid: BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
-    profilesFolder: CACHE_DIR
+    profilesFolder: CACHE_DIR,
+    useNativeRaknet: false
   })
 
   client.on('join', () => {
@@ -146,21 +140,21 @@ async function startBot() {
   client.on('disconnect', (packet) => {
     const reason = packet?.reason || String(packet)
     console.log("Disconnesso:", reason)
-    scheduleReconnect(10000)
+    scheduleReconnect(15000)
   })
 
   client.on('error', (err) => {
     console.log("Errore:", err.message)
-    scheduleReconnect(10000)
+    scheduleReconnect(15000)
   })
 
   client.on('close', () => {
     console.log("Connessione chiusa")
-    scheduleReconnect(10000)
+    scheduleReconnect(15000)
   })
 }
 
-function scheduleReconnect(delay = 10000) {
+function scheduleReconnect(delay = 15000) {
   if (reconnecting) return
   reconnecting = true
   if (antiBotInterval) { clearInterval(antiBotInterval); antiBotInterval = null }
@@ -170,12 +164,12 @@ function scheduleReconnect(delay = 10000) {
 
 process.on('uncaughtException', (err) => {
   console.log("Crash evitato:", err.message)
-  scheduleReconnect(10000)
+  scheduleReconnect(15000)
 })
 
 process.on('unhandledRejection', (err) => {
   console.log("Promise rifiutata:", err?.message || err)
-  scheduleReconnect(10000)
+  scheduleReconnect(15000)
 })
 
 startBot()
