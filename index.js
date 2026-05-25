@@ -4,50 +4,36 @@ const fs = require('fs')
 const path = require('path')
 
 const CACHE_DIR = './auth'
-const AUTH_ENV = 'AUTH_DATA'
 const PORT = process.env.PORT || 3000
 
-// =======================
-// RIPRISTINO TOKEN
-// =======================
 function restoreAuth() {
   try {
-    if (!process.env[AUTH_ENV]) {
-      console.log('AUTH_DATA non trovata')
-      return
-    }
+    if (!process.env.AUTH_DATA) return
 
-    const data = JSON.parse(process.env[AUTH_ENV])
+    const data = JSON.parse(process.env.AUTH_DATA)
 
     fs.mkdirSync(CACHE_DIR, { recursive: true })
 
-    for (const [filename, content] of Object.entries(data)) {
+    for (const [k, v] of Object.entries(data)) {
       fs.writeFileSync(
-        path.join(CACHE_DIR, filename),
-        JSON.stringify(content, null, 2)
+        path.join(CACHE_DIR, k),
+        JSON.stringify(v)
       )
     }
 
     console.log('Token ripristinato ✔')
-  } catch (err) {
-    console.error('Errore ripristino token:', err.message)
+  } catch (e) {
+    console.log('Errore auth:', e.message)
   }
 }
 
-// =======================
-// WEB SERVER (Render keep alive)
-// =======================
 http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' })
-  res.end('Bot online ✔')
-}).listen(PORT, () => {
-  console.log(`Web server attivo sulla porta ${PORT}`)
-})
+  res.end('OK')
+}).listen(PORT)
 
-// =======================
-// CONNESSIONE BOT
-// =======================
-function startBot() {
+console.log('Web server attivo')
+
+function start() {
   console.log('Tentativo di connessione...')
 
   const client = createClient({
@@ -56,7 +42,10 @@ function startBot() {
 
     skipPing: true,
     profilesFolder: CACHE_DIR,
-    connectTimeout: 60000
+
+    // 🔥 FIX IMPORTANTE
+    deviceId: undefined,
+    clientRandomId: undefined
   })
 
   client.on('join', () => {
@@ -67,23 +56,12 @@ function startBot() {
     console.log('SPAWN ✔')
   })
 
-  client.on('disconnect', (packet) => {
-    console.log('Disconnesso:')
-    console.log(packet)
+  client.on('disconnect', (p) => {
+    console.log('DISCONNECT:', p)
   })
 
-  client.on('close', () => {
-    console.log('Connessione chiusa')
-  })
-
-  client.on('error', (err) => {
-    console.error('Errore:')
-    console.error(err)
-  })
+  client.on('error', console.error)
 }
 
-// =======================
-// START
-// =======================
 restoreAuth()
-startBot()
+start()
