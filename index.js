@@ -1,4 +1,4 @@
-const { createClient } = require('bedrock-protocol')
+const { createClient, ping } = require('bedrock-protocol')
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
@@ -37,7 +37,6 @@ http.createServer((req, res) => {
     }
     return
   }
-  console.log(`[ping] ${new Date().toISOString()} - ${req.headers['user-agent'] || 'unknown'}`)
   res.writeHead(200)
   res.end('Bot online')
 }).listen(3000, () => {
@@ -52,11 +51,34 @@ const CONFIG = {
 
 let client = null
 let reconnecting = false
-let reconnectDelay = 5000
 let antiBotInterval = null
 let position = { x: 0, y: 64, z: 0 }
 
-function startBot() {
+async function waitForServer() {
+  let consecutiveOk = 0
+  while (true) {
+    try {
+      await ping({ host: CONFIG.host, port: CONFIG.port })
+      consecutiveOk++
+      console.log(`Server risponde (${consecutiveOk}/3)...`)
+      if (consecutiveOk >= 3) {
+        console.log("Server stabile, connessione in corso...")
+        return
+      }
+      await sleep(5000)
+    } catch (e) {
+      if (consecutiveOk > 0) console.log("Server non stabile, riprovo...")
+      consecutiveOk = 0
+      await sleep(10000)
+    }
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function startBot() {
   if (client) {
     try { client.disconnect() } catch (_) {}
     client = null
@@ -67,7 +89,17 @@ function startBot() {
   }
 
   reconnecting = false
-  console.log(`Avvio bot Bedrock... (retry delay: ${reconnectDelay / 1000}s)`)
+  console.log("Attendo che il server Aternos sia pronto...")
+
+  try {
+    await waitForServer()
+  } catch (e) {
+    console.log("Errore nel ping:", e.message)
+    scheduleReconnect(15000)
+    return
+  }
+
+  console.log("Avvio connessione bot Bedrock...")
 
   client = createClient({
     host: CONFIG.host,
@@ -79,7 +111,6 @@ function startBot() {
 
   client.on('join', () => {
     console.log("Bot entrato nel server ✔")
-    reconnectDelay = 5000
 
     try {
       const files = fs.readdirSync(CACHE_DIR)
@@ -87,9 +118,9 @@ function startBot() {
       for (const f of files) {
         data[f] = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, f), 'utf8'))
       }
-      console.log("=== AUTH_DATA (copia questo valore in Render) ===")
+      console.log("=== AUTH_DATA ===")
       console.log(JSON.stringify(data))
-      console.log("=================================================")
+      console.log("=================")
     } catch (_) {}
 
     let yaw = Math.random() * 360
@@ -113,42 +144,38 @@ function startBot() {
   })
 
   client.on('disconnect', (packet) => {
-    const reason = packet?.reason || packet
+    const reason = packet?.reason || String(packet)
     console.log("Disconnesso:", reason)
-    if (reason === 'server_id_conflict') {
-      reconnectDelay = Math.max(reconnectDelay, 30000)
-    }
-    scheduleReconnect()
+    scheduleReconnect(10000)
   })
 
   client.on('error', (err) => {
     console.log("Errore:", err.message)
-    scheduleReconnect()
+    scheduleReconnect(10000)
   })
 
   client.on('close', () => {
     console.log("Connessione chiusa")
-    scheduleReconnect()
+    scheduleReconnect(10000)
   })
 }
 
-function scheduleReconnect() {
+function scheduleReconnect(delay = 10000) {
   if (reconnecting) return
   reconnecting = true
   if (antiBotInterval) { clearInterval(antiBotInterval); antiBotInterval = null }
-  console.log(`Reconnect tra ${reconnectDelay / 1000} secondi...`)
-  setTimeout(startBot, reconnectDelay)
-  reconnectDelay = Math.min(reconnectDelay * 1.5, 60000)
+  console.log(`Reconnect tra ${delay / 1000} secondi...`)
+  setTimeout(startBot, delay)
 }
 
 process.on('uncaughtException', (err) => {
   console.log("Crash evitato:", err.message)
-  scheduleReconnect()
+  scheduleReconnect(10000)
 })
 
 process.on('unhandledRejection', (err) => {
   console.log("Promise rifiutata:", err?.message || err)
-  scheduleReconnect()
+  scheduleReconnect(10000)
 })
 
 startBot()
