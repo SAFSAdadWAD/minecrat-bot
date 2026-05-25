@@ -81,7 +81,6 @@ function startBot() {
     console.log("Bot entrato nel server ✔")
     reconnectDelay = 5000
 
-    // Stampa il token nei log così puoi salvarlo come variabile d'ambiente
     try {
       const files = fs.readdirSync(CACHE_DIR)
       const data = {}
@@ -114,7 +113,11 @@ function startBot() {
   })
 
   client.on('disconnect', (packet) => {
-    console.log("Disconnesso:", packet?.reason || packet)
+    const reason = packet?.reason || packet
+    console.log("Disconnesso:", reason)
+    if (reason === 'server_id_conflict') {
+      reconnectDelay = Math.max(reconnectDelay, 30000)
+    }
     scheduleReconnect()
   })
 
