@@ -6,6 +6,9 @@ const path = require('path')
 const CACHE_DIR = './auth'
 const PORT = process.env.PORT || 3000
 
+let client = null
+let reconnecting = false
+
 function restoreAuth() {
   try {
     if (!process.env.AUTH_DATA) return
@@ -31,19 +34,18 @@ http.createServer((req, res) => {
   res.end('OK')
 }).listen(PORT)
 
-console.log('Web server attivo')
+console.log('Web server attivo su porta', PORT)
 
-function start() {
+function connect() {
   console.log('Tentativo di connessione...')
 
-  const client = createClient({
+  client = createClient({
     host: 'procione.aternos.me',
     port: 29309,
 
     skipPing: true,
     profilesFolder: CACHE_DIR,
 
-    // 🔥 FIX IMPORTANTE
     deviceId: undefined,
     clientRandomId: undefined
   })
@@ -58,10 +60,35 @@ function start() {
 
   client.on('disconnect', (p) => {
     console.log('DISCONNECT:', p)
+    scheduleReconnect()
   })
 
-  client.on('error', console.error)
+  client.on('error', (err) => {
+    console.log('ERROR:', err?.message || err)
+    scheduleReconnect()
+  })
+}
+
+function scheduleReconnect() {
+  if (reconnecting) return
+
+  reconnecting = true
+
+  console.log('🔄 Riconnessione tra 5 secondi...')
+
+  setTimeout(() => {
+    reconnecting = false
+
+    try {
+      if (client) {
+        client.removeAllListeners()
+        client = null
+      }
+    } catch {}
+
+    connect()
+  }, 5000)
 }
 
 restoreAuth()
-start()
+connect()
