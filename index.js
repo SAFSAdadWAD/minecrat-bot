@@ -7,10 +7,9 @@ const CACHE_DIR = './auth'
 const PORT = process.env.PORT || 10000
 
 let client = null
-let reconnectTimer = null
-let connecting = false
+let reconnecting = false
 let isInServer = false
-let lastPacket = Date.now()
+let lastActivity = Date.now()
 
 function restoreAuth() {
   try {
@@ -39,56 +38,59 @@ http.createServer((req, res) => {
 
 console.log('Web server attivo su porta', PORT)
 
-function cleanupClient() {
+function destroyClient() {
+  if (!client) return
+
+  console.log('🧹 Distruggo client vecchio...')
+
   try {
-    if (!client) return
-
     client.removeAllListeners()
-
-    try {
-      client.disconnect()
-    } catch {}
-
-    try {
-      client.close()
-    } catch {}
-
-    client = null
   } catch {}
+
+  try {
+    client.disconnect()
+  } catch {}
+
+  try {
+    client.close()
+  } catch {}
+
+  try {
+    client.socket?.close?.()
+  } catch {}
+
+  client = null
+  isInServer = false
 }
 
 function reconnect(reason = 'unknown') {
-  if (reconnectTimer) return
+  if (reconnecting) return
 
-  console.log(`🔄 Reconnect (${reason}) tra 10 secondi...`)
+  reconnecting = true
 
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null
-    connecting = false
-    isInServer = false
+  console.log(`🔄 Reconnect immediato (${reason})...`)
 
-    cleanupClient()
-    connect()
-  }, 10000)
+  destroyClient()
+
+  reconnecting = false
+  connect()
 }
 
 function connect() {
-  if (connecting) return
-
-  connecting = true
-  isInServer = false
-
-  cleanupClient()
-
   console.log('Tentativo di connessione...')
+
+  destroyClient()
+
+  isInServer = false
+  lastActivity = Date.now()
 
   try {
     client = createClient({
       host: 'procione.aternos.me',
       port: 29309,
 
-      skipPing: true,
       profilesFolder: CACHE_DIR,
+      skipPing: true,
 
       deviceId: undefined,
       clientRandomId: Date.now()
@@ -96,43 +98,40 @@ function connect() {
 
     client.on('join', () => {
       console.log('BOT ENTRATO ✔')
-      lastPacket = Date.now()
+      lastActivity = Date.now()
     })
 
     client.on('spawn', () => {
       console.log('SPAWN ✔')
-      connecting = false
       isInServer = true
-      lastPacket = Date.now()
+      lastActivity = Date.now()
     })
 
     // aggiorna attività rete
-    client.on('packet', () => {
-      lastPacket = Date.now()
+    client.on('text', () => {
+      lastActivity = Date.now()
+    })
+
+    client.on('move_player', () => {
+      lastActivity = Date.now()
+    })
+
+    client.on('update_attributes', () => {
+      lastActivity = Date.now()
     })
 
     client.on('disconnect', (packet) => {
       console.log('DISCONNECT:', packet)
-
-      connecting = false
-      isInServer = false
-
       reconnect('disconnect')
     })
 
     client.on('error', (err) => {
       console.log('ERROR:', err?.message || err)
-
-      connecting = false
-      isInServer = false
-
       reconnect('error')
     })
 
   } catch (err) {
     console.log('Errore createClient:', err)
-
-    connecting = false
     reconnect('crash')
   }
 }
@@ -140,35 +139,35 @@ function connect() {
 restoreAuth()
 connect()
 
-// CHECK OGNI MINUTO
+// CHECK OGNI 20 SECONDI
 setInterval(() => {
   console.log('🔍 Check stato bot...')
 
-  const inactiveFor = Date.now() - lastPacket
+  const inactiveFor = Date.now() - lastActivity
 
   // bot fuori dal server
   if (!client || !isInServer) {
     console.log('⚠️ Bot fuori dal server')
-    reconnect('health-check')
+    reconnect('offline')
     return
   }
 
-  // client bloccato / morto
-  if (inactiveFor > 120000) {
+  // 5 minuti senza attività
+  if (inactiveFor > 300000) {
     console.log('⚠️ Connessione inattiva da troppo tempo')
     reconnect('timeout')
     return
   }
 
   console.log('✅ Bot online nel server')
-}, 60000)
+}, 20000)
 
 process.on('SIGINT', () => {
-  cleanupClient()
+  destroyClient()
   process.exit(0)
 })
 
 process.on('SIGTERM', () => {
-  cleanupClient()
+  destroyClient()
   process.exit(0)
 })
