@@ -10,6 +10,7 @@ let client = null
 let reconnecting = false
 let isInServer = false
 let lastActivity = Date.now()
+let reconnectAttempts = 0
 
 function restoreAuth() {
   try {
@@ -32,6 +33,7 @@ function restoreAuth() {
   }
 }
 
+// HTTP server (keep alive Render + UptimeRobot)
 http.createServer((req, res) => {
   res.end('BOT ONLINE')
 }).listen(PORT)
@@ -41,43 +43,37 @@ console.log('Web server attivo su porta', PORT)
 function destroyClient() {
   if (!client) return
 
-  console.log('🧹 Distruggo client vecchio...')
+  console.log('🧹 Distruggo client...')
 
-  try {
-    client.removeAllListeners()
-  } catch {}
-
-  try {
-    client.disconnect()
-  } catch {}
-
-  try {
-    client.close()
-  } catch {}
-
-  try {
-    client.socket?.close?.()
-  } catch {}
+  try { client.removeAllListeners() } catch {}
+  try { client.disconnect() } catch {}
+  try { client.close() } catch {}
+  try { client.socket?.close?.() } catch {}
 
   client = null
   isInServer = false
 }
 
-function reconnect(reason = 'unknown') {
+function scheduleReconnect(reason = 'unknown') {
   if (reconnecting) return
 
   reconnecting = true
+  reconnectAttempts++
 
-  console.log(`🔄 Reconnect immediato (${reason})...`)
+  const delay = Math.min(5000 + reconnectAttempts * 2000, 30000)
+
+  console.log(`🔄 Reconnect tra ${delay}ms (${reason})`)
 
   destroyClient()
 
-  reconnecting = false
-  connect()
+  setTimeout(() => {
+    reconnecting = false
+    connect()
+  }, delay)
 }
 
 function connect() {
-  console.log('Tentativo di connessione...')
+  console.log('🚀 Connessione bot...')
 
   destroyClient()
 
@@ -88,78 +84,72 @@ function connect() {
     client = createClient({
       host: 'procione.aternos.me',
       port: 29309,
-
       profilesFolder: CACHE_DIR,
       skipPing: true,
-
-      deviceId: undefined,
       clientRandomId: Date.now()
     })
 
     client.on('join', () => {
-      console.log('BOT ENTRATO ✔')
+      console.log('✔ JOIN')
       lastActivity = Date.now()
     })
 
     client.on('spawn', () => {
-      console.log('SPAWN ✔')
+      console.log('✔ SPAWN (in server)')
       isInServer = true
       lastActivity = Date.now()
+      reconnectAttempts = 0
     })
 
-    // aggiorna attività rete
-    client.on('text', () => {
-      lastActivity = Date.now()
-    })
+    // attività reale
+    client.on('text', () => lastActivity = Date.now())
+    client.on('move_player', () => lastActivity = Date.now())
 
-    client.on('move_player', () => {
-      lastActivity = Date.now()
-    })
-
-    client.on('update_attributes', () => {
-      lastActivity = Date.now()
+    // debug errori
+    client.on('error', (err) => {
+      console.log('❌ ERROR:', err?.message || err)
+      scheduleReconnect('error')
     })
 
     client.on('disconnect', (packet) => {
-      console.log('DISCONNECT:', packet)
-      reconnect('disconnect')
-    })
-
-    client.on('error', (err) => {
-      console.log('ERROR:', err?.message || err)
-      reconnect('error')
+      console.log('❌ DISCONNECT:', packet)
+      scheduleReconnect('disconnect')
     })
 
   } catch (err) {
-    console.log('Errore createClient:', err)
-    reconnect('crash')
+    console.log('❌ Crash createClient:', err.message)
+    scheduleReconnect('crash')
   }
 }
 
-restoreAuth()
-connect()
-
-// CHECK OGNI 20 SECONDI
+// 🔁 HEARTBEAT INTERNO (IMPORTANTE)
 setInterval(() => {
-  console.log('🔍 Check stato bot...')
+  if (client && isInServer) {
+    lastActivity = Date.now()
+  }
+}, 15000)
 
+// 🔍 MONITOR STATO (FIXATO)
+setInterval(() => {
   const inactiveFor = Date.now() - lastActivity
 
-  // bot fuori dal server
-  if (!client || !isInServer) {
-    console.log('⚠️ Bot fuori dal server')
-    reconnect('offline')
+  console.log('🔍 STATUS:', {
+    client: !!client,
+    isInServer,
+    inactiveSec: Math.floor(inactiveFor / 1000)
+  })
+
+  if (!client) {
+    scheduleReconnect('no client')
     return
   }
 
-  // 5 minuti senza attività
-  if (inactiveFor > 300000) {
-    console.log('⚠️ Connessione inattiva da troppo tempo')
-    reconnect('timeout')
-    return
+  // solo se sei nel server e davvero morto da troppo tempo
+  if (isInServer && inactiveFor > 900000) { // 15 min
+    console.log('⚠️ Timeout reale inattività')
+    scheduleReconnect('timeout')
   }
 
-  console.log('✅ Bot online nel server')
 }, 20000)
 
 process.on('SIGINT', () => {
@@ -171,3 +161,6 @@ process.on('SIGTERM', () => {
   destroyClient()
   process.exit(0)
 })
+
+restoreAuth()
+connect()
