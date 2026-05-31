@@ -7,43 +7,41 @@ const CACHE_DIR = './auth'
 const PORT = process.env.PORT || 10000
 
 let client = null
-let reconnecting = false
 let isInServer = false
-let lastActivity = Date.now()
-let reconnectAttempts = 0
+let reconnecting = false
+let spawnConfirmed = false
 
+let reconnectAttempts = 0
+let lastGoodState = Date.now()
+
+// ---------------- HTTP KEEP ALIVE ----------------
+http.createServer((req, res) => {
+  res.end('OK')
+}).listen(PORT)
+
+console.log("HTTP server attivo")
+
+// ---------------- AUTH RESTORE ----------------
 function restoreAuth() {
   try {
     if (!process.env.AUTH_DATA) return
 
     const data = JSON.parse(process.env.AUTH_DATA)
-
     fs.mkdirSync(CACHE_DIR, { recursive: true })
 
     for (const [k, v] of Object.entries(data)) {
-      fs.writeFileSync(
-        path.join(CACHE_DIR, k),
-        JSON.stringify(v)
-      )
+      fs.writeFileSync(path.join(CACHE_DIR, k), JSON.stringify(v))
     }
 
-    console.log('Token ripristinato ✔')
+    console.log("Auth ripristinata ✔")
   } catch (e) {
-    console.log('Errore auth:', e.message)
+    console.log("Errore auth:", e.message)
   }
 }
 
-// HTTP server (keep alive Render + UptimeRobot)
-http.createServer((req, res) => {
-  res.end('BOT ONLINE')
-}).listen(PORT)
-
-console.log('Web server attivo su porta', PORT)
-
+// ---------------- CLEAN CLIENT ----------------
 function destroyClient() {
   if (!client) return
-
-  console.log('🧹 Distruggo client...')
 
   try { client.removeAllListeners() } catch {}
   try { client.disconnect() } catch {}
@@ -52,33 +50,20 @@ function destroyClient() {
 
   client = null
   isInServer = false
+  spawnConfirmed = false
 }
 
-function scheduleReconnect(reason = 'unknown') {
+// ---------------- CONNECT ----------------
+async function connect() {
   if (reconnecting) return
-
   reconnecting = true
-  reconnectAttempts++
-
-  const delay = Math.min(5000 + reconnectAttempts * 2000, 30000)
-
-  console.log(`🔄 Reconnect tra ${delay}ms (${reason})`)
 
   destroyClient()
 
-  setTimeout(() => {
-    reconnecting = false
-    connect()
-  }, delay)
-}
+  const delay = Math.min(3000 * reconnectAttempts, 60000)
 
-function connect() {
-  console.log('🚀 Connessione bot...')
-
-  destroyClient()
-
-  isInServer = false
-  lastActivity = Date.now()
+  console.log(`🔄 Reconnect tra ${delay}ms`)
+  await new Promise(r => setTimeout(r, delay))
 
   try {
     client = createClient({
@@ -90,77 +75,84 @@ function connect() {
     })
 
     client.on('join', () => {
-      console.log('✔ JOIN')
-      lastActivity = Date.now()
+      console.log("JOIN")
     })
 
     client.on('spawn', () => {
-      console.log('✔ SPAWN (in server)')
+      console.log("SPAWN ✔")
       isInServer = true
-      lastActivity = Date.now()
+      spawnConfirmed = true
       reconnectAttempts = 0
+      lastGoodState = Date.now()
     })
 
-    // attività reale
-    client.on('text', () => lastActivity = Date.now())
-    client.on('move_player', () => lastActivity = Date.now())
+    client.on('text', () => lastGoodState = Date.now())
+    client.on('move_player', () => lastGoodState = Date.now())
 
-    // debug errori
-    client.on('error', (err) => {
-      console.log('❌ ERROR:', err?.message || err)
-      scheduleReconnect('error')
+    client.on('disconnect', () => {
+      console.log("DISCONNECT")
+      reconnectAttempts++
+      reconnecting = false
+      connect()
     })
 
-    client.on('disconnect', (packet) => {
-      console.log('❌ DISCONNECT:', packet)
-      scheduleReconnect('disconnect')
+    client.on('error', (e) => {
+      console.log("ERROR:", e?.message)
+      reconnectAttempts++
+      reconnecting = false
+      connect()
     })
 
-  } catch (err) {
-    console.log('❌ Crash createClient:', err.message)
-    scheduleReconnect('crash')
+  } catch (e) {
+    console.log("CRASH:", e.message)
+    reconnectAttempts++
+    reconnecting = false
+    connect()
   }
+
+  reconnecting = false
 }
 
-// 🔁 HEARTBEAT INTERNO (IMPORTANTE)
+// ---------------- HEARTBEAT (soft) ----------------
 setInterval(() => {
-  if (client && isInServer) {
-    lastActivity = Date.now()
+  if (client && spawnConfirmed) {
+    lastGoodState = Date.now()
   }
 }, 15000)
 
-// 🔍 MONITOR STATO (FIXATO)
+// ---------------- WATCHDOG (FISSO, ANTI-ZOMBIE) ----------------
 setInterval(() => {
-  const inactiveFor = Date.now() - lastActivity
+  const now = Date.now()
+  const idle = now - lastGoodState
 
-  console.log('🔍 STATUS:', {
+  console.log("STATUS:", {
     client: !!client,
-    isInServer,
-    inactiveSec: Math.floor(inactiveFor / 1000)
+    inServer: isInServer,
+    spawn: spawnConfirmed,
+    idleMin: Math.floor(idle / 60000)
   })
 
+  // CASO 1: client morto completamente
   if (!client) {
-    scheduleReconnect('no client')
+    console.log("❌ CLIENT NULL → reconnect")
+    reconnectAttempts++
+    reconnecting = false
+    connect()
     return
   }
 
-  // solo se sei nel server e davvero morto da troppo tempo
-  if (isInServer && inactiveFor > 900000) { // 15 min
-    console.log('⚠️ Timeout reale inattività')
-    scheduleReconnect('timeout')
+  // CASO 2: zombie connection (IL TUO PROBLEMA PRINCIPALE)
+  if (spawnConfirmed && idle > 10 * 60 * 1000) {
+    console.log("💀 ZOMBIE SOCKET → force reconnect")
+    reconnectAttempts++
+    reconnecting = false
+    destroyClient()
+    connect()
+    return
   }
 
-}, 20000)
+}, 30000)
 
-process.on('SIGINT', () => {
-  destroyClient()
-  process.exit(0)
-})
-
-process.on('SIGTERM', () => {
-  destroyClient()
-  process.exit(0)
-})
-
+// ---------------- START ----------------
 restoreAuth()
 connect()
