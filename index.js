@@ -8,20 +8,20 @@ const PORT = process.env.PORT || 10000
 
 let client = null
 let isInServer = false
-let reconnecting = false
 let spawnConfirmed = false
+let reconnecting = false
 
 let reconnectAttempts = 0
 let lastGoodState = Date.now()
 
-// ---------------- HTTP KEEP ALIVE ----------------
+// ---------------- HTTP (Render keep alive) ----------------
 http.createServer((req, res) => {
   res.end('OK')
 }).listen(PORT)
 
 console.log("HTTP server attivo")
 
-// ---------------- AUTH RESTORE ----------------
+// ---------------- AUTH ----------------
 function restoreAuth() {
   try {
     if (!process.env.AUTH_DATA) return
@@ -33,13 +33,13 @@ function restoreAuth() {
       fs.writeFileSync(path.join(CACHE_DIR, k), JSON.stringify(v))
     }
 
-    console.log("Auth ripristinata ✔")
+    console.log("Auth OK")
   } catch (e) {
-    console.log("Errore auth:", e.message)
+    console.log("Auth error:", e.message)
   }
 }
 
-// ---------------- CLEAN CLIENT ----------------
+// ---------------- CLEAN ----------------
 function destroyClient() {
   if (!client) return
 
@@ -53,6 +53,14 @@ function destroyClient() {
   spawnConfirmed = false
 }
 
+// ---------------- SMART BACKOFF ----------------
+function getDelay() {
+  return Math.min(
+    10000 + reconnectAttempts * 10000, // cresce lentamente
+    120000 // max 2 minuti
+  )
+}
+
 // ---------------- CONNECT ----------------
 async function connect() {
   if (reconnecting) return
@@ -60,12 +68,14 @@ async function connect() {
 
   destroyClient()
 
-  const delay = Math.min(3000 * reconnectAttempts, 60000)
-
+  const delay = getDelay()
   console.log(`🔄 Reconnect tra ${delay}ms`)
+
   await new Promise(r => setTimeout(r, delay))
 
   try {
+    console.log("➡️ Tentativo connessione server...")
+
     client = createClient({
       host: 'procione.aternos.me',
       port: 29309,
@@ -104,7 +114,7 @@ async function connect() {
     })
 
   } catch (e) {
-    console.log("CRASH:", e.message)
+    console.log("CONNECT FAIL:", e.message)
     reconnectAttempts++
     reconnecting = false
     connect()
@@ -113,17 +123,9 @@ async function connect() {
   reconnecting = false
 }
 
-// ---------------- HEARTBEAT (soft) ----------------
+// ---------------- WATCHDOG (SOFT) ----------------
 setInterval(() => {
-  if (client && spawnConfirmed) {
-    lastGoodState = Date.now()
-  }
-}, 15000)
-
-// ---------------- WATCHDOG (FISSO, ANTI-ZOMBIE) ----------------
-setInterval(() => {
-  const now = Date.now()
-  const idle = now - lastGoodState
+  const idle = Date.now() - lastGoodState
 
   console.log("STATUS:", {
     client: !!client,
@@ -132,23 +134,13 @@ setInterval(() => {
     idleMin: Math.floor(idle / 60000)
   })
 
-  // CASO 1: client morto completamente
-  if (!client) {
-    console.log("❌ CLIENT NULL → reconnect")
-    reconnectAttempts++
-    reconnecting = false
-    connect()
-    return
-  }
-
-  // CASO 2: zombie connection (IL TUO PROBLEMA PRINCIPALE)
-  if (spawnConfirmed && idle > 10 * 60 * 1000) {
-    console.log("💀 ZOMBIE SOCKET → force reconnect")
+  // SOLO zombie connection (non spammare subito)
+  if (client && spawnConfirmed && idle > 15 * 60 * 1000) {
+    console.log("💀 ZOMBIE SOCKET → reconnect")
     reconnectAttempts++
     reconnecting = false
     destroyClient()
     connect()
-    return
   }
 
 }, 30000)
