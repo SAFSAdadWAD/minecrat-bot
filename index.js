@@ -1,95 +1,173 @@
-"use strict";
+const { createClient } = require('bedrock-protocol')
+const http = require('http')
+const fs = require('fs')
+const path = require('path')
 
-const { createClient } = require("bedrock-protocol");
-const express = require("express");
+const CACHE_DIR = './auth'
+const PORT = process.env.PORT || 10000
 
-const HOST = "procione.aternos.me";
-const PORT = 29309;
+let client = null
+let reconnecting = false
+let isInServer = false
+let lastActivity = Date.now()
 
-let bot = null;
-let isConnected = false;
-let isConnecting = false;
+function restoreAuth() {
+  try {
+    if (!process.env.AUTH_DATA) return
 
-function log(msg) {
-  console.log(`[BOT] ${msg}`);
+    const data = JSON.parse(process.env.AUTH_DATA)
+
+    fs.mkdirSync(CACHE_DIR, { recursive: true })
+
+    for (const [k, v] of Object.entries(data)) {
+      fs.writeFileSync(
+        path.join(CACHE_DIR, k),
+        JSON.stringify(v)
+      )
+    }
+
+    console.log('Token ripristinato ✔')
+  } catch (e) {
+    console.log('Errore auth:', e.message)
+  }
 }
 
-// =====================
-// EXPRESS (Render keep alive)
-// =====================
-const app = express();
-const HTTP_PORT = process.env.PORT || 5000;
+http.createServer((req, res) => {
+  res.end('BOT ONLINE')
+}).listen(PORT)
 
-app.get("/", (req, res) => {
-  res.send("Bedrock bot is running");
-});
+console.log('Web server attivo su porta', PORT)
 
-app.get("/health", (req, res) => {
-  res.json({
-    connected: isConnected
-  });
-});
+function destroyClient() {
+  if (!client) return
 
-app.listen(HTTP_PORT, () => {
-  log(`HTTP server running on port ${HTTP_PORT}`);
-});
-
-// =====================
-// CONNECT BOT
-// =====================
-function connect() {
-  if (isConnecting || isConnected) return;
-
-  isConnecting = true;
-
-  log(`Connecting to ${HOST}:${PORT}`);
+  console.log('🧹 Distruggo client vecchio...')
 
   try {
-    bot = createClient({
-      host: HOST,
-      port: PORT,
-      username: "PROCIONE_" + Math.floor(Math.random() * 9999),
-      offline: false
-    });
+    client.removeAllListeners()
+  } catch {}
 
-    bot.on("connect", () => {
-      isConnected = true;
-      isConnecting = false;
-      log("Connected to server");
-    });
+  try {
+    client.disconnect()
+  } catch {}
 
-    bot.on("disconnect", () => {
-      isConnected = false;
-      isConnecting = false;
-      log("Disconnected from server");
-    });
+  try {
+    client.close()
+  } catch {}
 
-    bot.on("error", (err) => {
-      log("Error: " + (err.message || err));
-      isConnected = false;
-      isConnecting = false;
-    });
+  try {
+    client.socket?.close?.()
+  } catch {}
 
-  } catch (e) {
-    log("Fatal connect error: " + e.message);
-    isConnected = false;
-    isConnecting = false;
+  client = null
+  isInServer = false
+}
+
+function reconnect(reason = 'unknown') {
+  if (reconnecting) return
+
+  reconnecting = true
+
+  console.log(`🔄 Reconnect immediato (${reason})...`)
+
+  destroyClient()
+
+  reconnecting = false
+  connect()
+}
+
+function connect() {
+  console.log('Tentativo di connessione...')
+
+  destroyClient()
+
+  isInServer = false
+  lastActivity = Date.now()
+
+  try {
+    client = createClient({
+      host: 'procione.aternos.me',
+      port: 29309,
+
+      profilesFolder: CACHE_DIR,
+      skipPing: true,
+
+      deviceId: undefined,
+      clientRandomId: Date.now()
+    })
+
+    client.on('join', () => {
+      console.log('BOT ENTRATO ✔')
+      lastActivity = Date.now()
+    })
+
+    client.on('spawn', () => {
+      console.log('SPAWN ✔')
+      isInServer = true
+      lastActivity = Date.now()
+    })
+
+    // aggiorna attività rete
+    client.on('text', () => {
+      lastActivity = Date.now()
+    })
+
+    client.on('move_player', () => {
+      lastActivity = Date.now()
+    })
+
+    client.on('update_attributes', () => {
+      lastActivity = Date.now()
+    })
+
+    client.on('disconnect', (packet) => {
+      console.log('DISCONNECT:', packet)
+      reconnect('disconnect')
+    })
+
+    client.on('error', (err) => {
+      console.log('ERROR:', err?.message || err)
+      reconnect('error')
+    })
+
+  } catch (err) {
+    console.log('Errore createClient:', err)
+    reconnect('crash')
   }
 }
 
-// =====================
-// WATCHDOG (STABILE)
-// =====================
-setInterval(() => {
-  if (!isConnected && !isConnecting) {
-    log("Watchdog: reconnecting...");
-    connect();
-  }
-}, 15000); // 🔥 NON 5 sec (troppo aggressivo)
+restoreAuth()
+connect()
 
-// =====================
-// START DELAY
-// =====================
-setTimeout(() => {
-  connect();
-}, 5000);
+// CHECK OGNI 20 SECONDI
+setInterval(() => {
+  console.log('🔍 Check stato bot...')
+
+  const inactiveFor = Date.now() - lastActivity
+
+  // bot fuori dal server
+  if (!client || !isInServer) {
+    console.log('⚠️ Bot fuori dal server')
+    reconnect('offline')
+    return
+  }
+
+  // 5 minuti senza attività
+  if (inactiveFor > 300000) {
+    console.log('⚠️ Connessione inattiva da troppo tempo')
+    reconnect('timeout')
+    return
+  }
+
+  console.log('✅ Bot online nel server')
+}, 20000)
+
+process.on('SIGINT', () => {
+  destroyClient()
+  process.exit(0)
+})
+
+process.on('SIGTERM', () => {
+  destroyClient()
+  process.exit(0)
+})
