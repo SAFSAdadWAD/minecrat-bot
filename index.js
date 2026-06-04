@@ -1,4 +1,4 @@
-\const { createClient } = require('bedrock-protocol')
+const { createClient } = require('bedrock-protocol')
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
@@ -40,14 +40,23 @@ function restoreAuth() {
 }
 
 // =========================
-// WEB SERVER (UPTIME)
+// WEB SERVER
 // =========================
-http.createServer((req, res) => {
-  res.writeHead(200)
-  res.end('BOT ONLINE')
-}).listen(PORT)
+http
+  .createServer((req, res) => {
+    res.writeHead(200)
+    res.end('BOT ONLINE')
+  })
+  .listen(PORT)
 
 console.log('Web server attivo su porta', PORT)
+
+// =========================
+// UPDATE ATTIVITÀ
+// =========================
+function updateActivity() {
+  lastActivity = Date.now()
+}
 
 // =========================
 // DESTROY CLIENT SICURO
@@ -58,6 +67,7 @@ function destroyClient() {
   console.log('🧹 Distruggo client vecchio...')
 
   const oldClient = client
+
   client = null
   isInServer = false
 
@@ -74,7 +84,7 @@ function destroyClient() {
 }
 
 // =========================
-// RECONNECT SICURO
+// RECONNECT
 // =========================
 function reconnect(reason = 'unknown') {
   if (reconnecting) {
@@ -117,22 +127,20 @@ function connect() {
       profilesFolder: CACHE_DIR,
       skipPing: true,
 
-      deviceId: undefined,
       clientRandomId: Date.now()
     })
 
-    const updateActivity = () => {
-      lastActivity = Date.now()
-    }
-
     // =====================
-    // EVENTI PRINCIPALI
+    // JOIN
     // =====================
     client.on('join', () => {
       console.log('BOT ENTRATO ✔')
       updateActivity()
     })
 
+    // =====================
+    // SPAWN
+    // =====================
     client.on('spawn', () => {
       console.log('SPAWN ✔')
       isInServer = true
@@ -140,7 +148,7 @@ function connect() {
     })
 
     // =====================
-    // ATTIVITÀ RETE
+    // PACCHETTI ATTIVITÀ
     // =====================
     const packets = [
       'text',
@@ -181,7 +189,6 @@ function connect() {
         reconnect('error')
       }
     })
-
   } catch (err) {
     console.log('Errore createClient:', err)
 
@@ -198,13 +205,14 @@ restoreAuth()
 connect()
 
 // =========================
-// CHECK OGNI 20 SECONDI
+// CHECK STATO
 // =========================
 setInterval(() => {
   console.log('🔍 Check stato bot...')
 
   const inactiveFor = Date.now() - lastActivity
 
+  // Bot offline
   if (!client || !isInServer) {
     console.log('⚠️ Bot fuori dal server')
     reconnect('offline')
@@ -225,11 +233,13 @@ setInterval(() => {
 // SHUTDOWN SICURO
 // =========================
 function gracefulShutdown(signal) {
-  console.log(`\n${signal} ricevuto, chiusura...`)
+  console.log(`${signal} ricevuto, chiusura...`)
 
   try {
     destroyClient()
-  } catch {}
+  } catch (err) {
+    console.log(err)
+  }
 
   process.exit(0)
 }
@@ -237,11 +247,15 @@ function gracefulShutdown(signal) {
 process.on('SIGINT', () => gracefulShutdown('SIGINT'))
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 
-// Evita crash silenziosi
+// =========================
+// DEBUG CRASH
+// =========================
 process.on('uncaughtException', err => {
-  console.log('UNCAUGHT EXCEPTION:', err)
+  console.log('UNCAUGHT EXCEPTION:')
+  console.error(err)
 })
 
 process.on('unhandledRejection', err => {
-  console.log('UNHANDLED REJECTION:', err)
+  console.log('UNHANDLED REJECTION:')
+  console.error(err)
 })
