@@ -1,4 +1,4 @@
-const { createClient } = require('bedrock-protocol')
+\const { createClient } = require('bedrock-protocol')
 const http = require('http')
 const fs = require('fs')
 const path = require('path')
@@ -10,72 +10,97 @@ let client = null
 let reconnecting = false
 let isInServer = false
 let lastActivity = Date.now()
+let reconnectTimeout = null
 
+// =========================
+// RESTORE AUTH
+// =========================
 function restoreAuth() {
   try {
-    if (!process.env.AUTH_DATA) return
+    if (!process.env.AUTH_DATA) {
+      console.log('Nessun token salvato')
+      return
+    }
 
     const data = JSON.parse(process.env.AUTH_DATA)
 
     fs.mkdirSync(CACHE_DIR, { recursive: true })
 
-    for (const [k, v] of Object.entries(data)) {
+    for (const [fileName, content] of Object.entries(data)) {
       fs.writeFileSync(
-        path.join(CACHE_DIR, k),
-        JSON.stringify(v)
+        path.join(CACHE_DIR, fileName),
+        JSON.stringify(content)
       )
     }
 
     console.log('Token ripristinato ✔')
-  } catch (e) {
-    console.log('Errore auth:', e.message)
+  } catch (err) {
+    console.log('Errore auth:', err.message)
   }
 }
 
+// =========================
+// WEB SERVER (UPTIME)
+// =========================
 http.createServer((req, res) => {
+  res.writeHead(200)
   res.end('BOT ONLINE')
 }).listen(PORT)
 
 console.log('Web server attivo su porta', PORT)
 
+// =========================
+// DESTROY CLIENT SICURO
+// =========================
 function destroyClient() {
   if (!client) return
 
   console.log('🧹 Distruggo client vecchio...')
 
-  try {
-    client.removeAllListeners()
-  } catch {}
-
-  try {
-    client.disconnect()
-  } catch {}
-
-  try {
-    client.close()
-  } catch {}
-
-  try {
-    client.socket?.close?.()
-  } catch {}
-
+  const oldClient = client
   client = null
   isInServer = false
+
+  try {
+    oldClient.removeAllListeners()
+
+    // SOLO disconnect
+    if (typeof oldClient.disconnect === 'function') {
+      oldClient.disconnect()
+    }
+  } catch (err) {
+    console.log('Errore destroy:', err?.message || err)
+  }
 }
 
+// =========================
+// RECONNECT SICURO
+// =========================
 function reconnect(reason = 'unknown') {
-  if (reconnecting) return
+  if (reconnecting) {
+    console.log('⏳ Reconnect già in corso')
+    return
+  }
 
   reconnecting = true
 
-  console.log(`🔄 Reconnect immediato (${reason})...`)
+  console.log(`🔄 Reconnect (${reason})...`)
 
   destroyClient()
 
-  reconnecting = false
-  connect()
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout)
+  }
+
+  reconnectTimeout = setTimeout(() => {
+    reconnecting = false
+    connect()
+  }, 5000)
 }
 
+// =========================
+// CONNECT
+// =========================
 function connect() {
   console.log('Tentativo di connessione...')
 
@@ -96,64 +121,98 @@ function connect() {
       clientRandomId: Date.now()
     })
 
+    const updateActivity = () => {
+      lastActivity = Date.now()
+    }
+
+    // =====================
+    // EVENTI PRINCIPALI
+    // =====================
     client.on('join', () => {
       console.log('BOT ENTRATO ✔')
-      lastActivity = Date.now()
+      updateActivity()
     })
 
     client.on('spawn', () => {
       console.log('SPAWN ✔')
       isInServer = true
-      lastActivity = Date.now()
+      updateActivity()
     })
 
-    // aggiorna attività rete
-    client.on('text', () => {
-      lastActivity = Date.now()
+    // =====================
+    // ATTIVITÀ RETE
+    // =====================
+    const packets = [
+      'text',
+      'move_player',
+      'update_attributes',
+      'tick_sync',
+      'network_settings',
+      'inventory_content',
+      'level_chunk',
+      'set_time',
+      'play_status',
+      'player_list',
+      'respawn'
+    ]
+
+    packets.forEach(packet => {
+      client.on(packet, updateActivity)
     })
 
-    client.on('move_player', () => {
-      lastActivity = Date.now()
+    // =====================
+    // DISCONNECT
+    // =====================
+    client.on('disconnect', packet => {
+      console.log('DISCONNECT:', packet || 'unknown')
+
+      if (!reconnecting) {
+        reconnect('disconnect')
+      }
     })
 
-    client.on('update_attributes', () => {
-      lastActivity = Date.now()
-    })
-
-    client.on('disconnect', (packet) => {
-      console.log('DISCONNECT:', packet)
-      reconnect('disconnect')
-    })
-
-    client.on('error', (err) => {
+    // =====================
+    // ERROR
+    // =====================
+    client.on('error', err => {
       console.log('ERROR:', err?.message || err)
-      reconnect('error')
+
+      if (!reconnecting) {
+        reconnect('error')
+      }
     })
 
   } catch (err) {
     console.log('Errore createClient:', err)
-    reconnect('crash')
+
+    if (!reconnecting) {
+      reconnect('crash')
+    }
   }
 }
 
+// =========================
+// START
+// =========================
 restoreAuth()
 connect()
 
+// =========================
 // CHECK OGNI 20 SECONDI
+// =========================
 setInterval(() => {
   console.log('🔍 Check stato bot...')
 
   const inactiveFor = Date.now() - lastActivity
 
-  // bot fuori dal server
   if (!client || !isInServer) {
     console.log('⚠️ Bot fuori dal server')
     reconnect('offline')
     return
   }
 
-  // 5 minuti senza attività
-  if (inactiveFor > 300000) {
+  // 10 minuti inattivo
+  if (inactiveFor > 600000) {
     console.log('⚠️ Connessione inattiva da troppo tempo')
     reconnect('timeout')
     return
@@ -162,12 +221,27 @@ setInterval(() => {
   console.log('✅ Bot online nel server')
 }, 20000)
 
-process.on('SIGINT', () => {
-  destroyClient()
+// =========================
+// SHUTDOWN SICURO
+// =========================
+function gracefulShutdown(signal) {
+  console.log(`\n${signal} ricevuto, chiusura...`)
+
+  try {
+    destroyClient()
+  } catch {}
+
   process.exit(0)
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'))
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+
+// Evita crash silenziosi
+process.on('uncaughtException', err => {
+  console.log('UNCAUGHT EXCEPTION:', err)
 })
 
-process.on('SIGTERM', () => {
-  destroyClient()
-  process.exit(0)
+process.on('unhandledRejection', err => {
+  console.log('UNHANDLED REJECTION:', err)
 })
