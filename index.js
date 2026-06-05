@@ -6,7 +6,9 @@ const path = require('path')
 const CACHE_DIR = './auth'
 const PORT = process.env.PORT || 10000
 
+// =====================
 // SERVER BEDROCK
+// =====================
 const SERVER_HOST = 'procione.aternos.me'
 const SERVER_PORT = 29309
 
@@ -64,7 +66,7 @@ function updateActivity() {
 }
 
 // =====================
-// DESTROY CLIENT
+// DESTROY CLIENT SICURO
 // =====================
 function destroyClient() {
   if (!client) return
@@ -122,12 +124,11 @@ function connect() {
 
   connecting = true
   isInServer = false
+  lastActivity = Date.now()
 
   console.log(
     `Tentativo di connessione a ${SERVER_HOST}:${SERVER_PORT}...`
   )
-
-  lastActivity = Date.now()
 
   try {
     client = createClient({
@@ -135,6 +136,9 @@ function connect() {
       port: SERVER_PORT,
 
       profilesFolder: CACHE_DIR,
+
+      // FIX ATERNOS
+      skipPing: true,
 
       // timeout più alto
       connectTimeout: 30000,
