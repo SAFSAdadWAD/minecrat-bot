@@ -4,7 +4,7 @@ const fs = require('fs')
 const path = require('path')
 
 const HOST = 'procione.aternos.me'
-const PORT = 29309
+const PORT = 38020
 
 const CACHE_DIR = './auth'
 const WEB_PORT = process.env.PORT || 10000
