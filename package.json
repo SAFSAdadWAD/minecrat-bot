@@ -1,5 +1,5 @@
 {
-  "name": "minecraft",
+  "name": "minecraft-bedrock-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "node": "20.x"
   },
   "dependencies": {
-    "bedrock-protocol": "3.40.0"
+    "bedrock-protocol": "3.40.0",
+    "prismarine-nbt": "2.2.0"
   }
 }
