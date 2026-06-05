@@ -6,19 +6,36 @@ const path = require('path')
 const CACHE_DIR = './auth'
 const PORT = process.env.PORT || 10000
 
+// SERVER BEDROCK
+const SERVER_HOST = 'procione.aternos.me'
+const SERVER_PORT = 29309
+
 let client = null
 let reconnecting = false
+let connecting = false
 let isInServer = false
 let lastActivity = Date.now()
-let reconnectTimeout = null
+let reconnectTimer = null
 
-// =========================
+// =====================
+// WEB SERVER (RENDER)
+// =====================
+http
+  .createServer((req, res) => {
+    res.writeHead(200)
+    res.end('BOT ONLINE')
+  })
+  .listen(PORT)
+
+console.log(`Web server attivo su porta ${PORT}`)
+
+// =====================
 // RESTORE AUTH
-// =========================
+// =====================
 function restoreAuth() {
   try {
     if (!process.env.AUTH_DATA) {
-      console.log('Nessun token salvato')
+      console.log('⚠️ AUTH_DATA non trovato')
       return
     }
 
@@ -33,34 +50,22 @@ function restoreAuth() {
       )
     }
 
-    console.log('Token ripristinato ✔')
+    console.log('✅ Token ripristinato')
   } catch (err) {
-    console.log('Errore auth:', err.message)
+    console.log('❌ Errore restore auth:', err.message)
   }
 }
 
-// =========================
-// WEB SERVER
-// =========================
-http
-  .createServer((req, res) => {
-    res.writeHead(200)
-    res.end('BOT ONLINE')
-  })
-  .listen(PORT)
-
-console.log('Web server attivo su porta', PORT)
-
-// =========================
-// UPDATE ATTIVITÀ
-// =========================
+// =====================
+// UPDATE ACTIVITY
+// =====================
 function updateActivity() {
   lastActivity = Date.now()
 }
 
-// =========================
-// DESTROY CLIENT SICURO
-// =========================
+// =====================
+// DESTROY CLIENT
+// =====================
 function destroyClient() {
   if (!client) return
 
@@ -70,6 +75,7 @@ function destroyClient() {
 
   client = null
   isInServer = false
+  connecting = false
 
   try {
     oldClient.removeAllListeners()
@@ -79,13 +85,13 @@ function destroyClient() {
       oldClient.disconnect()
     }
   } catch (err) {
-    console.log('Errore destroy:', err?.message || err)
+    console.log('⚠️ Errore destroy:', err?.message || err)
   }
 }
 
-// =========================
+// =====================
 // RECONNECT
-// =========================
+// =====================
 function reconnect(reason = 'unknown') {
   if (reconnecting) {
     console.log('⏳ Reconnect già in corso')
@@ -98,58 +104,68 @@ function reconnect(reason = 'unknown') {
 
   destroyClient()
 
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout)
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
   }
 
-  reconnectTimeout = setTimeout(() => {
+  reconnectTimer = setTimeout(() => {
     reconnecting = false
     connect()
-  }, 5000)
+  }, 10000)
 }
 
-// =========================
+// =====================
 // CONNECT
-// =========================
+// =====================
 function connect() {
-  console.log('Tentativo di connessione...')
+  if (connecting) return
 
-  destroyClient()
-
+  connecting = true
   isInServer = false
+
+  console.log(
+    `Tentativo di connessione a ${SERVER_HOST}:${SERVER_PORT}...`
+  )
+
   lastActivity = Date.now()
 
   try {
     client = createClient({
-      host: 'procione.aternos.me',
-      port: 29309,
+      host: SERVER_HOST,
+      port: SERVER_PORT,
 
       profilesFolder: CACHE_DIR,
-      skipPing: true,
+
+      // timeout più alto
+      connectTimeout: 30000,
 
       clientRandomId: Date.now()
     })
 
-    // =====================
+    // =================
     // JOIN
-    // =====================
+    // =================
     client.on('join', () => {
-      console.log('BOT ENTRATO ✔')
+      console.log('✅ BOT ENTRATO')
+      connecting = false
       updateActivity()
     })
 
-    // =====================
+    // =================
     // SPAWN
-    // =====================
+    // =================
     client.on('spawn', () => {
-      console.log('SPAWN ✔')
+      console.log('✅ SPAWN')
+
       isInServer = true
+      connecting = false
+
       updateActivity()
     })
 
-    // =====================
-    // PACCHETTI ATTIVITÀ
-    // =====================
+    // =================
+    // KEEP ACTIVITY
+    // =================
     const packets = [
       'text',
       'move_player',
@@ -161,101 +177,142 @@ function connect() {
       'set_time',
       'play_status',
       'player_list',
-      'respawn'
+      'respawn',
+      'set_health'
     ]
 
     packets.forEach(packet => {
       client.on(packet, updateActivity)
     })
 
-    // =====================
+    // =================
     // DISCONNECT
-    // =====================
+    // =================
     client.on('disconnect', packet => {
-      console.log('DISCONNECT:', packet || 'unknown')
+      console.log('❌ DISCONNECT:', packet || 'unknown')
+
+      connecting = false
+      isInServer = false
 
       if (!reconnecting) {
         reconnect('disconnect')
       }
     })
 
-    // =====================
+    // =================
     // ERROR
-    // =====================
+    // =================
     client.on('error', err => {
-      console.log('ERROR:', err?.message || err)
+      console.log(
+        '❌ ERROR:',
+        err?.message || err
+      )
+
+      connecting = false
 
       if (!reconnecting) {
         reconnect('error')
       }
     })
   } catch (err) {
-    console.log('Errore createClient:', err)
+    console.log(
+      '❌ Errore createClient:',
+      err?.message || err
+    )
 
-    if (!reconnecting) {
-      reconnect('crash')
-    }
+    connecting = false
+
+    reconnect('crash')
   }
 }
 
-// =========================
+// =====================
 // START
-// =========================
+// =====================
 restoreAuth()
-connect()
 
-// =========================
-// CHECK STATO
-// =========================
+setTimeout(() => {
+  connect()
+}, 3000)
+
+// =====================
+// CHECK STATUS
+// =====================
 setInterval(() => {
   console.log('🔍 Check stato bot...')
 
-  const inactiveFor = Date.now() - lastActivity
+  const inactiveFor =
+    Date.now() - lastActivity
 
-  // Bot offline
+  if (connecting) {
+    console.log('⏳ Connessione in corso...')
+    return
+  }
+
   if (!client || !isInServer) {
-    console.log('⚠️ Bot fuori dal server')
+    console.log(
+      '⚠️ Bot fuori dal server'
+    )
+
     reconnect('offline')
     return
   }
 
-  // 10 minuti inattivo
-  if (inactiveFor > 600000) {
-    console.log('⚠️ Connessione inattiva da troppo tempo')
+  // 15 minuti inattivo
+  if (inactiveFor > 900000) {
+    console.log(
+      '⚠️ Nessuna attività da troppo tempo'
+    )
+
     reconnect('timeout')
     return
   }
 
-  console.log('✅ Bot online nel server')
+  console.log(
+    '✅ Bot online nel server'
+  )
 }, 20000)
 
-// =========================
-// SHUTDOWN SICURO
-// =========================
-function gracefulShutdown(signal) {
-  console.log(`${signal} ricevuto, chiusura...`)
+// =====================
+// SHUTDOWN
+// =====================
+function shutdown(signal) {
+  console.log(`${signal} ricevuto`)
 
   try {
     destroyClient()
-  } catch (err) {
-    console.log(err)
-  }
+  } catch {}
 
   process.exit(0)
 }
 
-process.on('SIGINT', () => gracefulShutdown('SIGINT'))
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+process.on('SIGINT', () =>
+  shutdown('SIGINT')
+)
 
-// =========================
-// DEBUG CRASH
-// =========================
-process.on('uncaughtException', err => {
-  console.log('UNCAUGHT EXCEPTION:')
-  console.error(err)
-})
+process.on('SIGTERM', () =>
+  shutdown('SIGTERM')
+)
 
-process.on('unhandledRejection', err => {
-  console.log('UNHANDLED REJECTION:')
-  console.error(err)
-})
+// =====================
+// DEBUG ERRORI
+// =====================
+process.on(
+  'uncaughtException',
+  err => {
+    console.log(
+      '❌ UNCAUGHT EXCEPTION'
+    )
+    console.error(err)
+  }
+)
+
+process.on(
+  'unhandledRejection',
+  err => {
+    console.log(
+      '❌ UNHANDLED REJECTION'
+    )
+    console.error(err)
+  }
+)
