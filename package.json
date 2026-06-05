@@ -1,11 +1,14 @@
 {
-  "name": "bedrock-bot",
+  "name": "minecraft-bedrock-bot",
   "version": "1.0.0",
   "main": "index.js",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "bedrock-protocol": "^3.0.0"
+    "bedrock-protocol": "3.40.0"
   }
 }
