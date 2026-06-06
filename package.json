@@ -1,12 +1,16 @@
 {
-  "name": "minecraft-ai-bot",
+  "name": "minecraft-java-bot",
   "version": "1.0.0",
+  "description": "Minecraft Java bot for Render",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "mineflayer": "^4.20.1",
-    "express": "^4.19.2"
+    "express": "^5.1.0",
+    "mineflayer": "^4.20.1"
   }
 }
