@@ -1,131 +1,124 @@
-const { createClient } = require('bedrock-protocol')
-const http = require('http')
-const fs = require('fs')
-const path = require('path')
+const bedrock = require('bedrock-protocol')
+const config = require('./config.json')
 
-const HOST = 'procione.aternos.me'
-const PORT = 38020
+let runtimeId = null
+let pos = { x: 0, y: 100, z: 0 }
 
-const CACHE_DIR = './auth'
-const WEB_PORT = process.env.PORT || 10000
+const client = bedrock.createClient({
+  host: config.host,
+  port: config.port,
+  username: config.username,
+  offline: true
+})
 
-let client = null
-let isInServer = false
-let connecting = false
-
-// =====================
-// WEB SERVER (RENDER)
-// =====================
-http.createServer((req, res) => {
-  res.writeHead(200)
-  res.end('BOT ONLINE')
-}).listen(WEB_PORT)
-
-console.log('Web server attivo su porta', WEB_PORT)
-
-// =====================
-// AUTH
-// =====================
-function restoreAuth() {
+function chat(message) {
   try {
-    if (!process.env.AUTH_DATA) return
-
-    const data = JSON.parse(process.env.AUTH_DATA)
-
-    fs.mkdirSync(CACHE_DIR, { recursive: true })
-
-    for (const [k, v] of Object.entries(data)) {
-      fs.writeFileSync(path.join(CACHE_DIR, k), JSON.stringify(v))
-    }
-
-    console.log('Token ripristinato ✔')
-  } catch (e) {
-    console.log('Errore auth:', e.message)
-  }
-}
-
-// =====================
-// CONNECT
-// =====================
-function connect() {
-  if (connecting) return
-  connecting = true
-
-  console.log('Tentativo connessione...')
-
-  try {
-    client = createClient({
-      host: HOST,
-      port: PORT,
-      profilesFolder: CACHE_DIR,
-      skipPing: true,
-      connectTimeout: 30000,
-      clientRandomId: Date.now()
+    client.queue('text', {
+      type: 'chat',
+      needs_translation: false,
+      source_name: config.username,
+      message,
+      xuid: '',
+      platform_chat_id: ''
     })
 
-    client.on('join', () => {
-      console.log('BOT ENTRATO ✔')
-    })
-
-    client.on('spawn', () => {
-      console.log('SPAWN ✔')
-      isInServer = true
-      connecting = false
-    })
-
-    client.on('disconnect', () => {
-      console.log('DISCONNECT')
-      isInServer = false
-      connecting = false
-    })
-
-    client.on('error', (err) => {
-      console.log('ERROR:', err?.message || err)
-      isInServer = false
-      connecting = false
-    })
-
+    console.log('[CHAT]', message)
   } catch (err) {
-    console.log('CONNECT ERROR:', err.message)
-    isInServer = false
-    connecting = false
+    console.error('Errore chat:', err.message)
   }
 }
 
-// =====================
-// DISCONNECT SAFE
-// =====================
-function destroyClient() {
-  if (!client) return
+client.on('start_game', packet => {
+  runtimeId = packet.runtime_entity_id
 
+  pos = {
+    x: packet.player_position.x,
+    y: packet.player_position.y,
+    z: packet.player_position.z
+  }
+
+  console.log('Bot connesso!')
+
+  chat('Ciao! Sono online 🤖')
+
+  startAI()
+})
+
+client.on('text', packet => {
+  const username = packet.source_name || 'Unknown'
+  const msg = packet.message?.toLowerCase() || ''
+
+  console.log(`${username}: ${msg}`)
+
+  if (msg.includes('ciao')) {
+    chat(`Ciao ${username}! 👋`)
+  }
+
+  if (msg.includes('come stai')) {
+    chat('Sto bene 😄')
+  }
+
+  if (msg.includes('chi sei')) {
+    chat('Sono un bot AI Bedrock')
+  }
+})
+
+function moveRandom() {
+  if (!runtimeId) return
+
+  pos.x += (Math.random() - 0.5) * 3
+  pos.z += (Math.random() - 0.5) * 3
+
+  const yaw = Math.random() * 360
+  const pitch = -20 + Math.random() * 40
+
+  sendMovement(yaw, pitch)
+}
+
+function lookAround() {
+  if (!runtimeId) return
+
+  const yaw = Math.random() * 360
+  const pitch = -20 + Math.random() * 40
+
+  sendMovement(yaw, pitch)
+}
+
+function sendMovement(yaw, pitch) {
   try {
-    client.removeAllListeners()
-    client.disconnect()
-  } catch {}
-
-  client = null
-  isInServer = false
-  connecting = false
+    client.queue('move_player', {
+      runtime_entity_id: runtimeId,
+      position: pos,
+      pitch,
+      yaw,
+      head_yaw: yaw,
+      mode: 0,
+      on_ground: true,
+      ridden_runtime_entity_id: 0,
+      tick: Date.now()
+    })
+  } catch (err) {
+    console.error('Errore movimento:', err.message)
+  }
 }
 
-// =====================
-// CHECK OGNI 5 SECONDI
-// =====================
-setInterval(() => {
-  console.log('🔍 Check bot...')
+function randomChat() {
+  const messages = config.messages
+  const msg = messages[Math.floor(Math.random() * messages.length)]
 
-  if (!client || !isInServer) {
-    console.log('⚠️ Bot fuori → riconnessione')
-    destroyClient()
-    connect()
-    return
-  }
+  chat(msg)
+}
 
-  console.log('✅ Bot dentro il server')
-}, 5000)
+function startAI() {
+  setInterval(moveRandom, config.moveInterval)
+  setInterval(lookAround, config.lookInterval)
+  setInterval(randomChat, config.chatInterval)
+}
 
-// =====================
-// START
-// =====================
-restoreAuth()
-connect()
+client.on('disconnect', () => {
+  console.log('Bot disconnesso')
+})
+
+client.on('error', err => {
+  console.error('Errore:', err)
+})
