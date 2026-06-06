@@ -1,16 +1,16 @@
 {
   "host": "anagrafe.aternos.me",
   "port": 25565,
-  "username": "AIBot",
+  "username": "Procione",
 
   "chatInterval": 45000,
   "moveInterval": 5000,
   "lookInterval": 3000,
 
   "messages": [
-    "Ciao 👋",
-    "Sto esplorando...",
-    "Bel server 😄",
-    "Qualcuno online?"
+    "SUCA 👋",
+    "DAVIDE STROZZATI",
+    "VIVA I PROCIONI 😄",
+    "VUOI UN PROCIONE?"
   ]
 }
