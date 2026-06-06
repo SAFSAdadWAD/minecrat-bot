@@ -1,8 +1,27 @@
 const mineflayer = require('mineflayer')
+const express = require('express')
 const config = require('./config.json')
 
+// ----------------------
+// 🌐 EXPRESS (Render + UptimeRobot)
+// ----------------------
+const app = express()
+const PORT = process.env.PORT || 3000
+
+app.get('/', (req, res) => {
+  res.send('Bot Minecraft attivo 🤖')
+})
+
+app.listen(PORT, () => {
+  console.log('Server web attivo sulla porta', PORT)
+})
+
+// ----------------------
+// 🤖 BOT MINECRAFT
+// ----------------------
 let bot
 let aiStarted = false
+let lastAction = Date.now()
 
 function startBot() {
   console.log('Connessione al server...')
@@ -16,7 +35,6 @@ function startBot() {
 
   bot.once('spawn', () => {
     console.log('Bot entrato nel server!')
-
     bot.chat('Ciao! Sono online 🤖')
 
     if (!aiStarted) {
@@ -29,7 +47,6 @@ function startBot() {
     if (username === bot.username) return
 
     const msg = message.toLowerCase()
-
     console.log(`[CHAT] ${username}: ${message}`)
 
     if (msg.includes('ciao')) {
@@ -41,7 +58,7 @@ function startBot() {
     }
 
     if (msg.includes('chi sei')) {
-      bot.chat('Sono un bot AI')
+      bot.chat('Sono un bot AI 🤖')
     }
 
     if (msg.includes('salta')) {
@@ -49,51 +66,106 @@ function startBot() {
     }
   })
 
-  bot.on('kicked', reason => {
+  bot.on('kicked', (reason) => {
     console.log('Kick:', reason)
     reconnect()
   })
 
-  bot.on('error', err => {
+  bot.on('error', (err) => {
     console.log('Errore:', err.message)
   })
 
   bot.on('end', () => {
-    console.log('Disconnesso.')
+    console.log('Connessione chiusa')
     reconnect()
   })
 }
 
+// ----------------------
+// 🔁 RECONNECT
+// ----------------------
 function reconnect() {
-  console.log('Riconnessione tra 15 secondi...')
-
+  console.log('Riconnessione tra 10 secondi...')
   aiStarted = false
 
   setTimeout(() => {
     startBot()
-  }, 15000)
+  }, 10000)
 }
 
-function randomLook() {
-  const yaw = Math.random() * Math.PI * 2
-  const pitch = (Math.random() - 0.5) * 0.8
+// ----------------------
+// 🧠 ANTI AFK AVANZATO
+// ----------------------
+function startAI() {
+  console.log('AI avanzata attiva 🤖')
+
+  setInterval(humanMovement, 1200)
+  setInterval(humanLook, 800)
+  setInterval(randomPause, 7000)
+  setInterval(randomChat, config.chatInterval || 45000)
+}
+
+// 🚶 movimento umano
+function humanMovement() {
+  if (!bot || !bot.entity) return
+
+  const now = Date.now()
+
+  if (now - lastAction < 2000 && Math.random() < 0.6) return
+
+  const actions = ['forward', 'left', 'right']
+  const action = actions[Math.floor(Math.random() * actions.length)]
+
+  bot.setControlState(action, true)
+
+  const duration = 400 + Math.random() * 900
+
+  setTimeout(() => {
+    bot.setControlState(action, false)
+  }, duration)
+
+  lastAction = now
+}
+
+// 👀 camera naturale
+function humanLook() {
+  if (!bot || !bot.entity) return
+
+  const yaw = bot.entity.yaw + (Math.random() - 0.5) * 0.4
+  const pitch = bot.entity.pitch + (Math.random() - 0.5) * 0.2
 
   bot.look(yaw, pitch, true)
 }
 
-function randomMove() {
-  const actions = ['forward', 'back', 'left', 'right']
+// 🧍 pause realistiche
+function randomPause() {
+  if (!bot) return
 
-  const action =
-    actions[Math.floor(Math.random() * actions.length)]
+  if (Math.random() < 0.3) {
+    bot.clearControlStates()
 
-  bot.setControlState(action, true)
-
-  setTimeout(() => {
-    bot.setControlState(action, false)
-  }, 1500)
+    setTimeout(() => {
+      lastAction = Date.now()
+    }, 1500 + Math.random() * 3000)
+  }
 }
 
+// 💬 chat random
+function randomChat() {
+  if (!bot) return
+
+  const messages = config.messages || [
+    'Ciao 👋',
+    'Sto esplorando...',
+    'Bel server 😄',
+    'Qualcuno online?'
+  ]
+
+  const msg = messages[Math.floor(Math.random() * messages.length)]
+  bot.chat(msg)
+}
+
+// 🦘 jump
 function jump() {
   bot.setControlState('jump', true)
 
@@ -102,21 +174,7 @@ function jump() {
   }, 500)
 }
 
-function randomChat() {
-  const messages = config.messages
-
-  const msg =
-    messages[Math.floor(Math.random() * messages.length)]
-
-  bot.chat(msg)
-}
-
-function startAI() {
-  console.log('AI avviata')
-
-  setInterval(randomMove, config.moveInterval || 5000)
-  setInterval(randomLook, config.lookInterval || 3000)
-  setInterval(randomChat, config.chatInterval || 45000)
-}
-
+// ----------------------
+// START
+// ----------------------
 startBot()
