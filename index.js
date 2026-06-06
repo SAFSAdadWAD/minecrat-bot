@@ -7,28 +7,29 @@ const PORT = process.env.PORT || 3000
 
 let bot = null
 let connecting = false
+let reconnecting = false
 let aiStarted = false
 
-// 🌐 Web server per Render / UptimeRobot
+// 🌐 Web server (Render / UptimeRobot)
 app.get('/', (req, res) => {
-  res.send('Bot Minecraft online!')
+  res.send('Bot Minecraft online 🤖')
 })
 
 app.listen(PORT, () => {
   console.log(`Web server attivo sulla porta ${PORT}`)
 })
 
-/* =======================
+/* =========================
    START BOT
-======================= */
+========================= */
 function startBot() {
-  if (connecting || bot) {
-    console.log('Connessione già attiva o in corso')
+  if (connecting || reconnecting || bot) {
+    console.log('Connessione bloccata (già attiva o in corso)')
     return
   }
 
   connecting = true
-  console.log('Tentativo di connessione...')
+  console.log('Connessione al server...')
 
   bot = mineflayer.createBot({
     host: config.host,
@@ -38,7 +39,6 @@ function startBot() {
     version: config.version || false
   })
 
-  // 🎮 Spawn
   bot.once('spawn', () => {
     console.log('Bot connesso!')
     connecting = false
@@ -51,7 +51,6 @@ function startBot() {
     }
   })
 
-  // 💬 Chat
   bot.on('chat', (username, message) => {
     if (!bot) return
     if (username === bot.username) return
@@ -68,28 +67,30 @@ function startBot() {
     }
   })
 
-  // ❌ Kick
   bot.on('kicked', (reason) => {
     console.log('KICK:', reason)
     safeReconnect()
   })
 
-  // ❌ Error
   bot.on('error', (err) => {
     console.log('Errore:', err.message)
   })
 
-  // ❌ Disconnect
   bot.on('end', () => {
     console.log('Disconnesso')
     safeReconnect()
   })
 }
 
-/* =======================
-   SAFE RECONNECT
-======================= */
+/* =========================
+   SAFE RECONNECT (FIXED)
+========================= */
 function safeReconnect() {
+  if (reconnecting) return
+  reconnecting = true
+
+  console.log('Riconnessione tra 30 secondi...')
+
   if (bot) {
     try {
       bot.quit()
@@ -98,17 +99,17 @@ function safeReconnect() {
 
   bot = null
   connecting = false
-
-  console.log('Riconnessione tra 60 secondi...')
+  aiStarted = false
 
   setTimeout(() => {
+    reconnecting = false
     startBot()
-  }, 60000) // IMPORTANTISSIMO: evita Aternos throttle
+  }, 30000) // ✔ 30 secondi (più veloce ma stabile)
 }
 
-/* =======================
+/* =========================
    CHAT
-======================= */
+========================= */
 function sendChat(message) {
   if (!bot) return
 
@@ -118,9 +119,9 @@ function sendChat(message) {
   } catch {}
 }
 
-/* =======================
+/* =========================
    MOVIMENTO
-======================= */
+========================= */
 function moveRandom() {
   if (!bot || !bot.entity) return
   if (typeof bot.setControlState !== 'function') return
@@ -132,7 +133,7 @@ function moveRandom() {
     bot.setControlState(dir, true)
 
     setTimeout(() => {
-      if (!bot || !bot.entity) return
+      if (!bot) return
       try {
         bot.setControlState(dir, false)
       } catch {}
@@ -140,9 +141,9 @@ function moveRandom() {
   } catch {}
 }
 
-/* =======================
+/* =========================
    LOOK
-======================= */
+========================= */
 function lookAround() {
   if (!bot || !bot.entity) return
 
@@ -153,9 +154,9 @@ function lookAround() {
   } catch {}
 }
 
-/* =======================
+/* =========================
    JUMP
-======================= */
+========================= */
 function jump() {
   if (!bot || !bot.entity) return
   if (typeof bot.setControlState !== 'function') return
@@ -172,16 +173,16 @@ function jump() {
   } catch {}
 }
 
-/* =======================
+/* =========================
    RANDOM CHAT
-======================= */
+========================= */
 function randomChat() {
   if (!bot) return
 
   const messages = config.messages || [
     'Ciao!',
     'Sono un bot 🤖',
-    'Sto girando il server!',
+    'Sto esplorando!',
     'Procione mode 🦝'
   ]
 
@@ -189,9 +190,9 @@ function randomChat() {
   sendChat(msg)
 }
 
-/* =======================
+/* =========================
    AI LOOP
-======================= */
+========================= */
 function startAI() {
   console.log('AI avviata')
 
@@ -208,7 +209,7 @@ function startAI() {
   }, config.chatInterval || 90000)
 }
 
-/* =======================
+/* =========================
    START
-======================= */
+========================= */
 startBot()
