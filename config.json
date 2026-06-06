@@ -1,1 +1,16 @@
+{
+  "host": "anagrafe.aternos.me",
+  "port": 38020,
+  "username": "Procione",
 
+  "chatInterval": 45000,
+  "moveInterval": 5000,
+  "lookInterval": 3000,
+
+  "messages": [
+    "SUCA",
+    "DAVIDE STROZZATI",
+    "VIVA I PROCIONI",
+    "VUOI UN PROCIONE?"
+  ]
+}
