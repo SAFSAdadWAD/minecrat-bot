@@ -3,8 +3,8 @@
   "port": 25565,
   "username": "Procione",
   "cracked": true,
-  "moveInterval": 5000,
-  "lookInterval": 3000,
+  "moveInterval": 10000,
+  "lookInterval": 15000,
   "chatInterval": 150000,
   "messages": [
     "SUCA",
