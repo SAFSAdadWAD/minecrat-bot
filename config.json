@@ -1,6 +1,6 @@
 {
   "host": "anagrafe.aternos.me",
-  "port": 38020,
+  "port": 25565,
   "username": "Procione",
 
   "chatInterval": 45000,
