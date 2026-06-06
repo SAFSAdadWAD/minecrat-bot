@@ -2,9 +2,9 @@ const mineflayer = require('mineflayer')
 const express = require('express')
 const config = require('./config.json')
 
-// ----------------------
+// --------------------
 // 🌐 EXPRESS (Render + UptimeRobot)
-// ----------------------
+// --------------------
 const app = express()
 const PORT = process.env.PORT || 3000
 
@@ -13,14 +13,15 @@ app.get('/', (req, res) => {
 })
 
 app.listen(PORT, () => {
-  console.log('Server web attivo sulla porta', PORT)
+  console.log('Web server attivo su porta', PORT)
 })
 
-// ----------------------
-// 🤖 BOT MINECRAFT
-// ----------------------
-let bot
+// --------------------
+// 🤖 BOT
+// --------------------
+let bot = null
 let aiStarted = false
+let reconnecting = false
 let lastAction = Date.now()
 
 function startBot() {
@@ -37,80 +38,106 @@ function startBot() {
     console.log('Bot entrato nel server!')
     bot.chat('Ciao! Sono online 🤖')
 
-    if (!aiStarted) {
-      aiStarted = true
-      startAI()
-    }
+    aiStarted = true
+    startAI()
   })
 
   bot.on('chat', (username, message) => {
-    if (username === bot.username) return
+    if (!bot || username === bot.username) return
 
     const msg = message.toLowerCase()
+
     console.log(`[CHAT] ${username}: ${message}`)
 
     if (msg.includes('ciao')) {
       bot.chat(`Ciao ${username}! 👋`)
     }
 
-    if (msg.includes('come stai')) {
-      bot.chat('Sto bene 😄')
-    }
-
     if (msg.includes('chi sei')) {
       bot.chat('Sono un bot AI 🤖')
     }
 
-    if (msg.includes('salta')) {
-      jump()
+    if (msg.includes('come stai')) {
+      bot.chat('Sto bene 😄')
     }
   })
 
   bot.on('kicked', (reason) => {
     console.log('Kick:', reason)
-    reconnect()
+    safeReconnect()
   })
 
   bot.on('error', (err) => {
     console.log('Errore:', err.message)
+    safeReconnect()
   })
 
   bot.on('end', () => {
     console.log('Connessione chiusa')
-    reconnect()
+    safeReconnect()
   })
 }
 
-// ----------------------
-// 🔁 RECONNECT
-// ----------------------
-function reconnect() {
-  console.log('Riconnessione tra 10 secondi...')
+// --------------------
+// 🔁 RECONNECT SAFE
+// --------------------
+function safeReconnect() {
+  if (reconnecting) return
+  reconnecting = true
+
+  console.log('Riconnessione tra 15 secondi...')
+
   aiStarted = false
 
+  if (bot) {
+    try {
+      bot.end()
+    } catch {}
+    bot = null
+  }
+
   setTimeout(() => {
+    reconnecting = false
     startBot()
-  }, 10000)
+  }, 15000)
 }
 
-// ----------------------
-// 🧠 ANTI AFK AVANZATO
-// ----------------------
+// --------------------
+// 🧠 ANTI-AFK AVANZATO
+// --------------------
 function startAI() {
-  console.log('AI avanzata attiva 🤖')
+  console.log('AI attiva 🤖')
 
-  setInterval(humanMovement, 1200)
-  setInterval(humanLook, 800)
-  setInterval(randomPause, 7000)
-  setInterval(randomChat, config.chatInterval || 45000)
+  setInterval(() => {
+    if (!bot || !bot.entity) return
+    humanMove()
+  }, 1200)
+
+  setInterval(() => {
+    if (!bot || !bot.entity) return
+    humanLook()
+  }, 900)
+
+  setInterval(() => {
+    if (!bot || !bot.entity) return
+    randomPause()
+  }, 7000)
+
+  setInterval(() => {
+    if (!bot || !bot.entity) return
+    randomChat()
+  }, config.chatInterval || 45000)
+
+  setInterval(() => {
+    keepAliveFix()
+  }, 15000)
 }
 
 // 🚶 movimento umano
-function humanMovement() {
-  if (!bot || !bot.entity) return
+function humanMove() {
+  if (!bot) return
 
   const now = Date.now()
-
   if (now - lastAction < 2000 && Math.random() < 0.6) return
 
   const actions = ['forward', 'left', 'right']
@@ -118,16 +145,14 @@ function humanMovement() {
 
   bot.setControlState(action, true)
 
-  const duration = 400 + Math.random() * 900
-
   setTimeout(() => {
-    bot.setControlState(action, false)
-  }, duration)
+    if (bot) bot.setControlState(action, false)
+  }, 500 + Math.random() * 900)
 
   lastAction = now
 }
 
-// 👀 camera naturale
+// 👀 look naturale
 function humanLook() {
   if (!bot || !bot.entity) return
 
@@ -141,8 +166,8 @@ function humanLook() {
 function randomPause() {
   if (!bot) return
 
-  if (Math.random() < 0.3) {
-    bot.clearControlStates()
+  if (Math.random() < 0.25) {
+    safeClearControls()
 
     setTimeout(() => {
       lastAction = Date.now()
@@ -165,16 +190,27 @@ function randomChat() {
   bot.chat(msg)
 }
 
-// 🦘 jump
-function jump() {
-  bot.setControlState('jump', true)
-
-  setTimeout(() => {
-    bot.setControlState('jump', false)
-  }, 500)
+// 🧹 SAFE CONTROL CLEAR
+function safeClearControls() {
+  if (bot && bot.clearControlStates) {
+    try {
+      bot.clearControlStates()
+    } catch {}
+  }
 }
 
-// ----------------------
+// 💓 keep alive fix timeout
+function keepAliveFix() {
+  if (!bot) return
+
+  try {
+    bot._client?.write('keep_alive', {
+      keepAliveId: Date.now()
+    })
+  } catch {}
+}
+
+// --------------------
 // START
-// ----------------------
+// --------------------
 startBot()
