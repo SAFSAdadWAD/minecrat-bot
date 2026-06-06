@@ -1,41 +1,38 @@
-const mineflayer = require('mineflayer')
-const express = require('express')
+const bedrock = require('bedrock-protocol')
 const config = require('./config.json')
 
-// ----------------------
-// 🌐 EXPRESS (Render + UptimeRobot)
-// ----------------------
-const app = express()
-const PORT = process.env.PORT || 3000
+let client = null
+let runtimeId = null
+let pos = {
+  x: 0,
+  y: 100,
+  z: 0
+}
 
-app.get('/', (req, res) => {
-  res.send('Bot Minecraft attivo 🤖')
-})
-
-app.listen(PORT, () => {
-  console.log('Server web attivo sulla porta', PORT)
-})
-
-// ----------------------
-// 🤖 BOT MINECRAFT
-// ----------------------
-let bot
 let aiStarted = false
-let lastAction = Date.now()
 
 function startBot() {
-  console.log('Connessione al server...')
+  console.log('Tentativo di connessione...')
 
-  bot = mineflayer.createBot({
+  client = bedrock.createClient({
     host: config.host,
-    port: Number(config.port),
+    port: config.port,
     username: config.username,
-    auth: 'offline'
+    offline: true
   })
 
-  bot.once('spawn', () => {
-    console.log('Bot entrato nel server!')
-    bot.chat('Ciao! Sono online 🤖')
+  client.on('start_game', (packet) => {
+    console.log('Bot connesso!')
+
+    runtimeId = packet.runtime_entity_id
+
+    pos = {
+      x: packet.player_position.x,
+      y: packet.player_position.y,
+      z: packet.player_position.z
+    }
+
+    sendChat('Ciao! Sono online 🤖')
 
     if (!aiStarted) {
       aiStarted = true
@@ -43,138 +40,157 @@ function startBot() {
     }
   })
 
-  bot.on('chat', (username, message) => {
-    if (username === bot.username) return
+  client.on('text', (packet) => {
+    const username = packet.source_name || 'Giocatore'
+    const msg = packet.message?.toLowerCase() || ''
 
-    const msg = message.toLowerCase()
-    console.log(`[CHAT] ${username}: ${message}`)
+    console.log(`[CHAT] ${username}: ${msg}`)
 
     if (msg.includes('ciao')) {
-      bot.chat(`Ciao ${username}! 👋`)
+      sendChat(`Ciao ${username}! 👋`)
     }
 
     if (msg.includes('come stai')) {
-      bot.chat('Sto bene 😄')
+      sendChat('Sto bene 😄')
     }
 
     if (msg.includes('chi sei')) {
-      bot.chat('Sono un bot AI 🤖')
+      sendChat('Sono un bot AI Bedrock')
     }
 
     if (msg.includes('salta')) {
+      sendChat('Boing 😄')
       jump()
     }
   })
 
-  bot.on('kicked', (reason) => {
-    console.log('Kick:', reason)
+  client.on('disconnect', () => {
+    console.log('Disconnesso dal server.')
     reconnect()
   })
 
-  bot.on('error', (err) => {
+  client.on('error', (err) => {
     console.log('Errore:', err.message)
-  })
-
-  bot.on('end', () => {
-    console.log('Connessione chiusa')
     reconnect()
   })
 }
 
-// ----------------------
-// 🔁 RECONNECT
-// ----------------------
 function reconnect() {
-  console.log('Riconnessione tra 10 secondi...')
+  console.log('Riconnessione tra 15 secondi...')
+
+  runtimeId = null
   aiStarted = false
 
   setTimeout(() => {
     startBot()
-  }, 10000)
+  }, 15000)
 }
 
-// ----------------------
-// 🧠 ANTI AFK AVANZATO
-// ----------------------
-function startAI() {
-  console.log('AI avanzata attiva 🤖')
+function sendChat(message) {
+  if (!client) return
 
-  setInterval(humanMovement, 1200)
-  setInterval(humanLook, 800)
-  setInterval(randomPause, 7000)
-  setInterval(randomChat, config.chatInterval || 45000)
-}
+  try {
+    client.queue('text', {
+      type: 'chat',
+      needs_translation: false,
+      source_name: config.username,
+      message,
+      xuid: '',
+      platform_chat_id: ''
+    })
 
-// 🚶 movimento umano
-function humanMovement() {
-  if (!bot || !bot.entity) return
-
-  const now = Date.now()
-
-  if (now - lastAction < 2000 && Math.random() < 0.6) return
-
-  const actions = ['forward', 'left', 'right']
-  const action = actions[Math.floor(Math.random() * actions.length)]
-
-  bot.setControlState(action, true)
-
-  const duration = 400 + Math.random() * 900
-
-  setTimeout(() => {
-    bot.setControlState(action, false)
-  }, duration)
-
-  lastAction = now
-}
-
-// 👀 camera naturale
-function humanLook() {
-  if (!bot || !bot.entity) return
-
-  const yaw = bot.entity.yaw + (Math.random() - 0.5) * 0.4
-  const pitch = bot.entity.pitch + (Math.random() - 0.5) * 0.2
-
-  bot.look(yaw, pitch, true)
-}
-
-// 🧍 pause realistiche
-function randomPause() {
-  if (!bot) return
-
-  if (Math.random() < 0.3) {
-    bot.clearControlStates()
-
-    setTimeout(() => {
-      lastAction = Date.now()
-    }, 1500 + Math.random() * 3000)
+    console.log('[BOT]', message)
+  } catch (err) {
+    console.log('Errore chat:', err.message)
   }
 }
 
-// 💬 chat random
-function randomChat() {
-  if (!bot) return
+function sendMovement(yaw, pitch) {
+  if (!client || !runtimeId) return
 
-  const messages = config.messages || [
-    'Ciao 👋',
-    'Sto esplorando...',
-    'Bel server 😄',
-    'Qualcuno online?'
-  ]
-
-  const msg = messages[Math.floor(Math.random() * messages.length)]
-  bot.chat(msg)
+  try {
+    client.queue('move_player', {
+      runtime_entity_id: runtimeId,
+      position: pos,
+      pitch,
+      yaw,
+      head_yaw: yaw,
+      mode: 0,
+      on_ground: true,
+      ridden_runtime_entity_id: 0,
+      tick: Date.now()
+    })
+  } catch (err) {
+    console.log('Errore movimento:', err.message)
+  }
 }
 
-// 🦘 jump
+function moveRandom() {
+  if (!runtimeId) return
+
+  pos.x += (Math.random() - 0.5) * 3
+  pos.z += (Math.random() - 0.5) * 3
+
+  const yaw = Math.random() * 360
+  const pitch = -20 + Math.random() * 40
+
+  sendMovement(yaw, pitch)
+}
+
+function lookAround() {
+  if (!runtimeId) return
+
+  const yaw = Math.random() * 360
+  const pitch = -25 + Math.random() * 50
+
+  sendMovement(yaw, pitch)
+}
+
 function jump() {
-  bot.setControlState('jump', true)
+  if (!runtimeId) return
+
+  pos.y += 1
+
+  sendMovement(
+    Math.random() * 360,
+    0
+  )
 
   setTimeout(() => {
-    bot.setControlState('jump', false)
+    pos.y -= 1
   }, 500)
 }
 
-// ----------------------
-// START
-// ----------------------
+function randomChat() {
+  if (!client) return
+
+  const messages = config.messages || [
+      'SUCA',
+    'DAVIDE STROZZATI',
+    'VIVA I PROCIONI',
+    'VUOI UN PROCIONE?'
+  ]
+
+  const randomMessage =
+    messages[Math.floor(Math.random() * messages.length)]
+
+  sendChat(randomMessage)
+}
+
+function startAI() {
+  console.log('AI avviata')
+
+  setInterval(() => {
+    moveRandom()
+  }, config.moveInterval || 5000)
+
+  setInterval(() => {
+    lookAround()
+  }, config.lookInterval || 3000)
+
+  setInterval(() => {
+    randomChat()
+  }, config.chatInterval || 45000)
+}
+
 startBot()
