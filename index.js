@@ -1,36 +1,35 @@
-const bedrock = require('bedrock-protocol')
+const express = require('express')
+const mineflayer = require('mineflayer')
 const config = require('./config.json')
 
-let client = null
-let runtimeId = null
-let pos = {
-  x: 0,
-  y: 100,
-  z: 0
-}
+const app = express()
+const PORT = process.env.PORT || 3000
 
+let bot = null
 let aiStarted = false
 
+// SERVER WEB PER RENDER / UPTIMEROBOT
+app.get('/', (req, res) => {
+  res.send('Bot Minecraft online!')
+})
+
+app.listen(PORT, () => {
+  console.log(`Web server attivo sulla porta ${PORT}`)
+})
+
+// AVVIO BOT
 function startBot() {
   console.log('Tentativo di connessione...')
 
-  client = bedrock.createClient({
+  bot = mineflayer.createBot({
     host: config.host,
-    port: config.port,
+    port: config.port || 25565,
     username: config.username,
-    offline: true
+    auth: config.cracked ? 'offline' : 'microsoft'
   })
 
-  client.on('start_game', (packet) => {
+  bot.once('spawn', () => {
     console.log('Bot connesso!')
-
-    runtimeId = packet.runtime_entity_id
-
-    pos = {
-      x: packet.player_position.x,
-      y: packet.player_position.y,
-      z: packet.player_position.z
-    }
 
     sendChat('Ciao! Sono online 🤖')
 
@@ -40,11 +39,13 @@ function startBot() {
     }
   })
 
-  client.on('text', (packet) => {
-    const username = packet.source_name || 'Giocatore'
-    const msg = packet.message?.toLowerCase() || ''
+  // CHAT
+  bot.on('chat', (username, message) => {
+    if (username === bot.username) return
 
-    console.log(`[CHAT] ${username}: ${msg}`)
+    const msg = message.toLowerCase()
+
+    console.log(`[CHAT] ${username}: ${message}`)
 
     if (msg.includes('ciao')) {
       sendChat(`Ciao ${username}! 👋`)
@@ -55,7 +56,7 @@ function startBot() {
     }
 
     if (msg.includes('chi sei')) {
-      sendChat('Sono un bot AI Bedrock')
+      sendChat('Sono un bot AI Java 😎')
     }
 
     if (msg.includes('salta')) {
@@ -64,21 +65,25 @@ function startBot() {
     }
   })
 
-  client.on('disconnect', () => {
-    console.log('Disconnesso dal server.')
+  bot.on('kicked', (reason) => {
+    console.log('Espulso:', reason)
     reconnect()
   })
 
-  client.on('error', (err) => {
+  bot.on('error', (err) => {
     console.log('Errore:', err.message)
+  })
+
+  bot.on('end', () => {
+    console.log('Disconnesso dal server.')
     reconnect()
   })
 }
 
+// RICONNESSIONE
 function reconnect() {
   console.log('Riconnessione tra 15 secondi...')
 
-  runtimeId = null
   aiStarted = false
 
   setTimeout(() => {
@@ -86,86 +91,66 @@ function reconnect() {
   }, 15000)
 }
 
+// INVIA MESSAGGIO
 function sendChat(message) {
-  if (!client) return
+  if (!bot) return
 
   try {
-    client.queue('text', {
-      type: 'chat',
-      needs_translation: false,
-      source_name: config.username,
-      message,
-      xuid: '',
-      platform_chat_id: ''
-    })
-
+    bot.chat(message)
     console.log('[BOT]', message)
   } catch (err) {
     console.log('Errore chat:', err.message)
   }
 }
 
-function sendMovement(yaw, pitch) {
-  if (!client || !runtimeId) return
-
-  try {
-    client.queue('move_player', {
-      runtime_entity_id: runtimeId,
-      position: pos,
-      pitch,
-      yaw,
-      head_yaw: yaw,
-      mode: 0,
-      on_ground: true,
-      ridden_runtime_entity_id: 0,
-      tick: Date.now()
-    })
-  } catch (err) {
-    console.log('Errore movimento:', err.message)
-  }
-}
-
+// MOVIMENTO CASUALE
 function moveRandom() {
-  if (!runtimeId) return
+  if (!bot || !bot.entity) return
 
-  pos.x += (Math.random() - 0.5) * 3
-  pos.z += (Math.random() - 0.5) * 3
+  const directions = [
+    'forward',
+    'back',
+    'left',
+    'right'
+  ]
 
-  const yaw = Math.random() * 360
-  const pitch = -20 + Math.random() * 40
+  const randomDirection =
+    directions[Math.floor(Math.random() * directions.length)]
 
-  sendMovement(yaw, pitch)
-}
-
-function lookAround() {
-  if (!runtimeId) return
-
-  const yaw = Math.random() * 360
-  const pitch = -25 + Math.random() * 50
-
-  sendMovement(yaw, pitch)
-}
-
-function jump() {
-  if (!runtimeId) return
-
-  pos.y += 1
-
-  sendMovement(
-    Math.random() * 360,
-    0
-  )
+  bot.setControlState(randomDirection, true)
 
   setTimeout(() => {
-    pos.y -= 1
+    bot.setControlState(randomDirection, false)
+  }, 1500)
+}
+
+// GUARDA IN GIRO
+function lookAround() {
+  if (!bot || !bot.entity) return
+
+  const yaw = Math.random() * Math.PI * 2
+  const pitch = (Math.random() - 0.5) * 0.8
+
+  bot.look(yaw, pitch, true)
+}
+
+// SALTO
+function jump() {
+  if (!bot) return
+
+  bot.setControlState('jump', true)
+
+  setTimeout(() => {
+    bot.setControlState('jump', false)
   }, 500)
 }
 
+// CHAT RANDOM
 function randomChat() {
-  if (!client) return
+  if (!bot) return
 
   const messages = config.messages || [
-      'SUCA',
+    'SUCA',
     'DAVIDE STROZZATI',
     'VIVA I PROCIONI',
     'VUOI UN PROCIONE?'
@@ -177,6 +162,7 @@ function randomChat() {
   sendChat(randomMessage)
 }
 
+// AI BOT
 function startAI() {
   console.log('AI avviata')
 
