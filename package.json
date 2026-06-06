@@ -1,11 +1,11 @@
 {
-  "name": "minecraft-bedrock-ai-bot",
+  "name": "minecraft-ai-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "bedrock-protocol": "^3.40.0"
+    "mineflayer": "^4.20.1"
   }
 }
