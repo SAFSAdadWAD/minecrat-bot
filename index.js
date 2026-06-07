@@ -2,6 +2,14 @@ const express = require('express')
 const mineflayer = require('mineflayer')
 const config = require('./config.json')
 
+process.on('uncaughtException', (err) => {
+  console.log('Errore ignorato:', err.message)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.log('Rejection ignorata:', reason)
+})
+
 const app = express()
 const PORT = process.env.PORT || 3000
 
