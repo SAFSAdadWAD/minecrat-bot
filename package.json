@@ -1,13 +1,12 @@
 {
   "name": "bot1",
   "version": "1.0.0",
-  "description": "Minecraft Java bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "^5.2.1",
-    "mineflayer": "^4.37.1"
+    "express": "^5.1.0",
+    "mineflayer": "^4.20.1"
   }
 }
