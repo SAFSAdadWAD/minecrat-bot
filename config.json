@@ -3,6 +3,7 @@
   "port": 25565,
   "username": "Procione",
   "cracked": true,
+  "version": "1.21.1",
   "moveInterval": 10000,
   "lookInterval": 15000,
   "chatInterval": 150000,
