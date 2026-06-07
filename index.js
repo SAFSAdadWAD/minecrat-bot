@@ -52,13 +52,8 @@ function startBot() {
     auth: config.cracked ? 'offline' : 'microsoft',
     version: config.version || '1.21.1',
     keepAlive: true,
-    checkTimeoutInterval: 60000
-  })
-
-  // Blocca trasferimenti automatici BungeeCord/Velocity
-  // senza questo il bot segue il transfer su porte interne (es. 38020)
-  bot._client.on('transfer', (packet) => {
-    console.log(`Transfer BungeeCord ignorato (porta ${packet.port}) — rimango sul proxy`)
+    checkTimeoutInterval: 60000,
+    skipSRV: true
   })
 
   bot.once('spawn', () => {
